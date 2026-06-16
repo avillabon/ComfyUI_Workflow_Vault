@@ -7,6 +7,8 @@ documentation — then browse, search, and reopen them later.
 Everything is stored as plain files (JSON, Markdown, images/video/audio) in a
 folder you choose on disk. No database, no account, no cloud sync.
 
+![Workflow Vault screenshot](assets/screenshot.png)
+
 ## Installation
 
 1. Copy (or clone) this folder into your ComfyUI `custom_nodes` directory, so

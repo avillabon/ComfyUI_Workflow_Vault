@@ -3,7 +3,7 @@
 
 import { el, clear, showToast, confirmDialog, toggleField } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
-import { STATUS_LABELS, STATUS_ORDER, GENERATION_TYPES } from "./vault_modal.js";
+import { STATUS_LABELS, STATUS_ORDER, renderGenTypePicker } from "./vault_modal.js";
 import { renderFolderSelect } from "./vault_folders.js";
 import { renderTagInput, tagCountsFrom } from "./vault_tag_input.js";
 import { renderThumbnailField } from "./vault_thumbnail_input.js";
@@ -129,11 +129,7 @@ function renderCreateForm(controller) {
   const defaultFolderId = controller.wizardOptions?.defaultFolderId || "";
   controller.state.folders = controller.state.folders || [];
   const folderSelect = renderFolderSelect({ folders: controller.state.folders, selectedId: defaultFolderId });
-  const genTypeSelect = el(
-    "select",
-    { className: "wv-input" },
-    [el("option", { value: "" }, ["— None —"]), ...GENERATION_TYPES.map((t) => el("option", { value: t.id }, [t.label]))]
-  );
+  const genTypePicker = renderGenTypePicker([], markDirty);
   const favSwitch = toggleField("Favorite", false, markDirty);
   const thumbField = renderThumbnailField({ currentUrl: null });
 
@@ -141,7 +137,7 @@ function renderCreateForm(controller) {
   const customLabelInput = el("input", { className: "wv-input", type: "text", placeholder: "e.g. Initial version" });
   const versionNotesInput = el("textarea", { className: "wv-input wv-textarea", placeholder: "Notes for this version (Markdown supported)" });
 
-  for (const input of [nameInput, descInput, statusSelect, genTypeSelect, folderSelect, thumbField.fileInput, customLabelInput, versionNotesInput]) {
+  for (const input of [nameInput, descInput, statusSelect, folderSelect, thumbField.fileInput, customLabelInput, versionNotesInput]) {
     input.addEventListener("input", markDirty);
     input.addEventListener("change", markDirty);
   }
@@ -153,7 +149,8 @@ function renderCreateForm(controller) {
   left.appendChild(requiredRow("Name", nameInput));
   left.appendChild(formRow("Description", descInput));
   left.appendChild(formRow("Tags", tagInput));
-  left.appendChild(el("div", { className: "wv-form-row-pair" }, [formRow("Status", statusSelect), formRow("Generation type", genTypeSelect)]));
+  left.appendChild(formRow("Status", statusSelect));
+  left.appendChild(formRow("Generation types", genTypePicker));
   left.appendChild(formRow("Folder", folderSelect));
   left.appendChild(el("div", { className: "wv-form-row" }, [favSwitch]));
   left.appendChild(formRow("Thumbnail (optional)", thumbField));
@@ -277,7 +274,7 @@ function renderCreateForm(controller) {
         description: descInput.value,
         tags: tagInput.getTags(),
         status: statusSelect.value,
-        generation_type: genTypeSelect.value || null,
+        generation_types: genTypePicker.getSelected(),
         favorite: favSwitch.input.checked,
         folder_id: folderSelect.value === "__new__" ? null : folderSelect.value || null,
         custom_label: customLabelInput.value.trim() || null,

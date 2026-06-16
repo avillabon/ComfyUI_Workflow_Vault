@@ -10,7 +10,9 @@
     "upscale",
     "sample"
   ],
-  "generation_type": "image",
+  "generation_types": [
+    "image"
+  ],
   "status": "stable",
   "favorite": true,
   "thumbnail": "thumbnails/cover.png",

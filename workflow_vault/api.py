@@ -349,6 +349,28 @@ async def post_archive_entry(request):
     return web.json_response(storage.build_entry_state(vault_root, slug))
 
 
+@routes.post("/workflow-vault/entries/{entry_id}/duplicate")
+async def post_duplicate_entry(request):
+    """Clone an entry into a new one under a user-supplied unique name, keeping
+    only the source's current version. File copying runs off the event loop."""
+    vault_root, err = _require_vault()
+    if err:
+        return err
+    entry_id = request.match_info["entry_id"]
+    slug, _manifest, err = _require_entry(vault_root, entry_id)
+    if err:
+        return err
+    body, err = await _read_json(request)
+    if err:
+        return err
+
+    new_name = (body.get("name") or "").strip()
+    state, err_msg = await asyncio.to_thread(entries.duplicate_entry, vault_root, slug, new_name)
+    if err_msg:
+        return _error(err_msg)
+    return web.json_response(state)
+
+
 @routes.post("/workflow-vault/entries/{entry_id}/delete")
 async def post_delete_entry(request):
     """Delete a whole entry from the vault, sending its folder to the Recycle

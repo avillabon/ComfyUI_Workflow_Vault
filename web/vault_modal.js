@@ -34,6 +34,37 @@ export const GENERATION_TYPES = [
 ];
 export const GENERATION_TYPE_MAP = Object.fromEntries(GENERATION_TYPES.map((t) => [t.id, t]));
 
+// Multi-select picker for generation types: a row of toggle chips (one per
+// fixed type). Returns an element exposing getSelected() -> ordered id list.
+export function renderGenTypePicker(selected = [], onChange) {
+  const chosen = new Set(selected);
+  const wrap = el("div", { className: "wv-gentype-picker" });
+  for (const t of GENERATION_TYPES) {
+    const chip = el(
+      "button",
+      {
+        type: "button",
+        className: `wv-gentype-chip${chosen.has(t.id) ? " wv-gentype-chip-active" : ""}`,
+        "aria-pressed": chosen.has(t.id) ? "true" : "false",
+        title: t.label,
+        onclick: () => {
+          if (chosen.has(t.id)) chosen.delete(t.id);
+          else chosen.add(t.id);
+          const on = chosen.has(t.id);
+          chip.classList.toggle("wv-gentype-chip-active", on);
+          chip.setAttribute("aria-pressed", on ? "true" : "false");
+          if (onChange) onChange();
+        },
+      },
+      [el("i", { className: t.icon }), t.label]
+    );
+    wrap.appendChild(chip);
+  }
+  // Preserve the canonical GENERATION_TYPES order regardless of click order.
+  wrap.getSelected = () => GENERATION_TYPES.map((t) => t.id).filter((id) => chosen.has(id));
+  return wrap;
+}
+
 // ---------------------------------------------------------------------------
 // Loading / init
 // ---------------------------------------------------------------------------
@@ -323,7 +354,7 @@ function renderGenerationTypeFilter(container, controller) {
 
   const list = el("div", { className: "wv-folder-tree" });
   for (const t of GENERATION_TYPES) {
-    const count = entries.filter((e) => e.generation_type === t.id).length;
+    const count = entries.filter((e) => (e.generation_types || []).includes(t.id)).length;
     const active = filters.generationType === t.id;
     const toggle = () => {
       controller.filters.generationType = active ? null : t.id;
@@ -444,7 +475,7 @@ function filterEntries(controller) {
   }
 
   if (filters.generationType) {
-    entries = entries.filter((e) => e.generation_type === filters.generationType);
+    entries = entries.filter((e) => (e.generation_types || []).includes(filters.generationType));
   }
 
   if (filters.folderId === null) {
@@ -489,7 +520,7 @@ function renderCard(entry, controller) {
 
   const thumb = el("div", { className: "wv-card-thumb" });
   if (entry.thumbnail) {
-    thumb.appendChild(el("img", { src: VaultAPI.mediaUrl(entry.id, entry.thumbnail), alt: entry.name, loading: "lazy", decoding: "async" }));
+    thumb.appendChild(el("img", { src: VaultAPI.mediaUrl(entry.id, entry.thumbnail, entry.updated_at), alt: entry.name, loading: "lazy", decoding: "async" }));
   } else if (controller.state.settings?.default_thumbnail_behavior !== "blank") {
     thumb.appendChild(el("div", { className: "wv-card-thumb-placeholder" }, [el("i", { className: "pi pi-image" })]));
   }
@@ -532,11 +563,27 @@ function renderCard(entry, controller) {
       [el("i", { className: "pi pi-play" })]
     )
   );
-  if (entry.generation_type && GENERATION_TYPE_MAP[entry.generation_type]) {
-    const t = GENERATION_TYPE_MAP[entry.generation_type];
-    thumb.appendChild(
-      el("span", { className: "wv-card-gentype", title: `Generation type: ${t.label}` }, [el("i", { className: t.icon }), t.label])
-    );
+  const genTypes = (entry.generation_types || []).map((id) => GENERATION_TYPE_MAP[id]).filter(Boolean);
+  if (genTypes.length) {
+    const MAX_BADGES = 2;
+    const shown = genTypes.slice(0, MAX_BADGES);
+    const badges = el("div", { className: "wv-card-gentypes" });
+    for (const t of shown) {
+      badges.appendChild(
+        el("span", { className: "wv-card-gentype", title: `Generation type: ${t.label}` }, [el("i", { className: t.icon }), t.label])
+      );
+    }
+    const extra = genTypes.length - shown.length;
+    if (extra > 0) {
+      badges.appendChild(
+        el(
+          "span",
+          { className: "wv-card-gentype wv-card-gentype-more", title: genTypes.map((t) => t.label).join(", ") },
+          [`+${extra}`]
+        )
+      );
+    }
+    thumb.appendChild(badges);
   }
   card.appendChild(thumb);
 

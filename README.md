@@ -48,11 +48,12 @@ example media already filled in. You can switch to your own folder later from
   toggles, sort controls (by name, created date, or last updated), and a
   **per-row density selector** (2, 3, or 4 columns) on the breadcrumb line.
 - **Sidebar** shows a nested folder tree and a **Generation Type** filter
-  (Image, Video, Audio, 3D Model, LLM, API Nodes) with live counts.
+  (Image, Video, Audio, 3D Model, LLM, API Nodes) with live counts. An entry
+  can carry more than one type and shows up under each.
 - **Favorites** — star any entry from the grid card or detail view; favorites
   pin to the top in "last updated" sort order.
-- **Grid cards** show the thumbnail, entry name, status, generation type badge,
-  favorite toggle, and a one-click "open workflow" button. Optional card fields
+- **Grid cards** show the thumbnail, entry name, status, generation type
+  badge(s), favorite toggle, and a one-click "open workflow" button. Optional card fields
   (description, tags, version count, example count, date) are individually
   toggleable in settings for a cleaner look.
 - **Accent color** — a single color tints all icons and the logo throughout the
@@ -78,6 +79,10 @@ example media already filled in. You can switch to your own folder later from
   - **Examples** — add, edit, delete, and reorder examples and their
     input/output media, with live previews and drag-to-move between Inputs and
     Outputs.
+- **Entry actions** (in the Settings tab) — **Duplicate** an entry into a new
+  one (copies the thumbnail, tags, generation types, examples, and notes, plus
+  only the current version), **Archive** / restore, and **Delete** (sent to the
+  OS Recycle Bin / Trash where supported).
 
 ### Save wizard
 

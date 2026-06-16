@@ -51,6 +51,8 @@ export const VaultAPI = {
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/archive`, body),
   deleteEntry: (entryId) =>
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/delete`, {}),
+  duplicateEntry: (entryId, name) =>
+    postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/duplicate`, { name }),
   openEntryFolder: (entryId) =>
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/open-folder`, {}),
   revealMedia: (entryId, relPath) =>
@@ -83,8 +85,12 @@ export const VaultAPI = {
   updateFolder: (folderId, body) => postJSON(`/workflow-vault/folders/${encodeURIComponent(folderId)}`, body),
   deleteFolder: (folderId) => postJSON(`/workflow-vault/folders/${encodeURIComponent(folderId)}/delete`, {}),
 
-  mediaUrl: (entryId, relPath) => {
-    const route = `/workflow-vault/media?entry_id=${encodeURIComponent(entryId)}&path=${encodeURIComponent(relPath)}`;
+  mediaUrl: (entryId, relPath, version) => {
+    // `version` is an optional cache-buster: thumbnails keep a stable filename
+    // (cover.webp), so without it the browser shows a stale cached image after
+    // the file is replaced. Passing the entry's updated_at forces a refetch.
+    let route = `/workflow-vault/media?entry_id=${encodeURIComponent(entryId)}&path=${encodeURIComponent(relPath)}`;
+    if (version) route += `&v=${encodeURIComponent(version)}`;
     return typeof api.apiURL === "function" ? api.apiURL(route) : route;
   },
 

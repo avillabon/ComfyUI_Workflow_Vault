@@ -10,7 +10,10 @@
     "loop",
     "sample"
   ],
-  "generation_type": "video",
+  "generation_types": [
+    "video",
+    "image"
+  ],
   "status": "experimental",
   "favorite": false,
   "thumbnail": "thumbnails/cover.gif",

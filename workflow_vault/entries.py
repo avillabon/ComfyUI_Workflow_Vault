@@ -31,6 +31,23 @@ def normalize_tags(tags):
     return result
 
 
+def normalize_generation_types(value):
+    """Coerce an incoming value into an ordered, de-duplicated list of valid
+    generation types. Accepts a list, a single string, or None; silently drops
+    anything not in VALID_GENERATION_TYPES."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple)):
+        return []
+    result = []
+    for v in value:
+        if v in VALID_GENERATION_TYPES and v not in result:
+            result.append(v)
+    return result
+
+
 def normalize_notes(notes):
     """Coerce incoming notes into a clean [{id, title, content}] list."""
     result = []
@@ -61,7 +78,7 @@ def _all_names_and_slugs(vault_root, exclude_slug=None):
 
 
 def create_entry(vault_root, data):
-    """data keys: name, description, tags, status, generation_type, favorite,
+    """data keys: name, description, tags, status, generation_types, favorite,
     folder_id, notes, version_label, custom_label, version_notes,
     workflow (dict), thumbnail ({bytes, filename}),
     examples (list of {...}) each with optional input_files/output_files.
@@ -83,9 +100,10 @@ def create_entry(vault_root, data):
     if status not in VALID_STATUSES:
         status = "draft"
 
-    generation_type = data.get("generation_type")
-    if generation_type not in VALID_GENERATION_TYPES:
-        generation_type = None
+    # Accept the new plural field, falling back to the legacy singular one.
+    generation_types = normalize_generation_types(
+        data["generation_types"] if "generation_types" in data else data.get("generation_type")
+    )
 
     base_slug = utils.slugify(name)
     slug = utils.unique_slug(base_slug, slugs)
@@ -104,7 +122,7 @@ def create_entry(vault_root, data):
         "description": data.get("description") or "",
         "tags": normalize_tags(data.get("tags")),
         "status": status,
-        "generation_type": generation_type,
+        "generation_types": generation_types,
         "favorite": bool(data.get("favorite", False)),
         "thumbnail": None,
         "thumbnail_source": None,
@@ -211,11 +229,10 @@ def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None,
             return new_slug, "Invalid status."
         manifest["status"] = data["status"]
 
-    if "generation_type" in data:
-        gt = data["generation_type"]
-        if gt is not None and gt not in VALID_GENERATION_TYPES:
-            return new_slug, "Invalid generation type."
-        manifest["generation_type"] = gt
+    if "generation_types" in data or "generation_type" in data:
+        raw = data["generation_types"] if "generation_types" in data else data.get("generation_type")
+        manifest["generation_types"] = normalize_generation_types(raw)
+        manifest.pop("generation_type", None)  # migrate away from the legacy field
 
     if "favorite" in data:
         manifest["favorite"] = bool(data["favorite"])
@@ -276,6 +293,106 @@ def delete_entry(vault_root, slug):
     except OSError as e:
         return None, f"Could not delete entry: {e}"
     return method, None
+
+
+def duplicate_entry(vault_root, source_slug, new_name):
+    """Clone an entry into a brand-new entry under new_name: same description,
+    tags, status, generation types, favorite, folder, thumbnail, examples, and
+    notes — but carrying ONLY the source's current version (a fresh single-
+    version history), never the full version history.
+    Returns (entry_state, error)."""
+    new_name = (new_name or "").strip()
+    if not new_name:
+        return None, "Name is required."
+    src_manifest = storage.read_manifest(vault_root, source_slug)
+    if not src_manifest:
+        return None, "Entry not found."
+
+    names, slugs = _all_names_and_slugs(vault_root)
+    if new_name.lower() in names:
+        return None, "An entry with this name already exists."
+    new_slug = utils.unique_slug(utils.slugify(new_name), slugs)
+
+    src_dir = storage.entry_dir(vault_root, source_slug)
+    dst_dir = storage.entry_dir(vault_root, new_slug)
+    try:
+        shutil.copytree(src_dir, dst_dir)
+    except OSError as e:
+        shutil.rmtree(dst_dir, ignore_errors=True)
+        return None, f"Could not copy entry files: {e}"
+
+    manifest = storage.read_manifest(vault_root, new_slug)
+    now = utils.now_iso()
+    manifest["id"] = utils.generate_id("entry")
+    manifest["slug"] = new_slug
+    manifest["name"] = new_name
+    manifest["created_at"] = now
+    manifest["updated_at"] = now
+
+    # Keep only the source's current version; drop the rest of the history.
+    _trim_to_single_version(vault_root, new_slug, manifest, src_manifest.get("current_version_id"))
+    # Fresh ids for examples + their media so nothing is shared with the source.
+    _reidentify_examples(vault_root, new_slug)
+
+    storage.write_manifest(vault_root, new_slug, manifest)
+
+    # Mirror folder membership (manifest.folder_id was copied verbatim, but the
+    # folder's own entry_ids list needs the new entry id added).
+    if manifest.get("folder_id"):
+        ok, _ferr = folders_mod.add_entry_to_folder(vault_root, manifest["folder_id"], manifest["id"])
+        if not ok:
+            manifest["folder_id"] = None
+            storage.write_manifest(vault_root, new_slug, manifest)
+
+    return storage.build_entry_state(vault_root, new_slug), None
+
+
+def _trim_to_single_version(vault_root, slug, manifest, source_current_version_id):
+    """Reduce a freshly-copied entry to a single version — the source's current
+    one (falling back to the most recent) — relabeled as a clean 'v001' with a
+    fresh version id. Other version directories are deleted."""
+    versions_list = storage.list_versions(vault_root, slug)
+    if not versions_list:
+        manifest["current_version_id"] = None
+        return
+    keep = next((v for v in versions_list if v.get("id") == source_current_version_id), versions_list[-1])
+
+    for v in versions_list:
+        if v.get("dir") != keep.get("dir"):
+            shutil.rmtree(storage.version_dir(vault_root, slug, v["dir"]), ignore_errors=True)
+
+    old_dir = storage.version_dir(vault_root, slug, keep["dir"])
+    new_dir = storage.version_dir(vault_root, slug, "v001")
+    if os.path.normpath(old_dir) != os.path.normpath(new_dir):
+        shutil.rmtree(new_dir, ignore_errors=True)
+        try:
+            os.rename(old_dir, new_dir)
+        except OSError:
+            new_dir = old_dir  # keep the original dir name if the rename fails
+
+    vpath = os.path.join(new_dir, "version.json")
+    vdata = utils.read_json(vpath) or {}
+    new_version_id = utils.generate_id("version")
+    created = utils.now_iso()
+    vdata["id"] = new_version_id
+    vdata["label"] = "v001"
+    vdata["created_at"] = created
+    vdata["updated_at"] = created
+    utils.atomic_write_json(vpath, vdata)
+    manifest["current_version_id"] = new_version_id
+
+
+def _reidentify_examples(vault_root, slug):
+    """Give every copied example (and its media items) fresh ids so the
+    duplicate never shares ids with the source it was cloned from."""
+    for example in storage.list_examples(vault_root, slug):
+        example["id"] = utils.generate_id("example")
+        for role in ("inputs", "outputs"):
+            for item in example.get(role, []):
+                item["id"] = utils.generate_id("media")
+        edir = storage.example_dir(vault_root, slug, example["dir"])
+        saved = {k: v for k, v in example.items() if k != "dir"}
+        utils.atomic_write_json(os.path.join(edir, "example.json"), saved)
 
 
 def compress_all_thumbnail_sources(vault_root):

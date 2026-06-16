@@ -1,9 +1,9 @@
 // Entry detail view: header, tab router, plus the Overview and Settings
 // tabs (the others live in their own modules to keep files manageable).
 
-import { el, clear, formatDate, showToast, confirmDialog, openImageLightbox, toggleField } from "./vault_dom.js";
+import { el, clear, formatDate, showToast, confirmDialog, promptDialog, openImageLightbox, toggleField } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
-import { STATUS_LABELS, STATUS_ORDER, GENERATION_TYPES } from "./vault_modal.js";
+import { STATUS_LABELS, STATUS_ORDER, renderGenTypePicker } from "./vault_modal.js";
 import { renderFolderSelect, folderPath } from "./vault_folders.js";
 import { openWorkflowInGraph } from "./vault_workflow.js";
 import { renderVersionsTab } from "./vault_versions_tab.js";
@@ -124,7 +124,7 @@ function renderOverviewSummary(controller, entry) {
   // Thumbnail leads as the visual anchor.
   const thumb = el("div", { className: "wv-overview-thumb" });
   if (entry.thumbnail) {
-    thumb.appendChild(el("img", { src: VaultAPI.mediaUrl(entry.id, entry.thumbnail), alt: entry.name, loading: "lazy", decoding: "async" }));
+    thumb.appendChild(el("img", { src: VaultAPI.mediaUrl(entry.id, entry.thumbnail, entry.updated_at), alt: entry.name, loading: "lazy", decoding: "async" }));
     // Reveal the thumbnail (and its archived original) in the OS file manager,
     // matching the per-media button in the examples gallery.
     thumb.appendChild(
@@ -241,14 +241,7 @@ function renderEntryMetadataForm(controller, entry) {
     statusSelect.appendChild(el("option", { value: "archived", selected: true }, [STATUS_LABELS.archived]));
   }
 
-  const genTypeSelect = el(
-    "select",
-    { className: "wv-input" },
-    [
-      el("option", { value: "", selected: !entry.generation_type }, ["— None —"]),
-      ...GENERATION_TYPES.map((t) => el("option", { value: t.id, selected: entry.generation_type === t.id }, [t.label])),
-    ]
-  );
+  const genTypePicker = renderGenTypePicker(entry.generation_types || [], () => controller.setDirty(true));
 
   const favSwitch = toggleField("Favorite", !!entry.favorite, () => controller.setDirty(true));
 
@@ -256,11 +249,11 @@ function renderEntryMetadataForm(controller, entry) {
   const folderSelect = renderFolderSelect({ folders: controller.state.folders, selectedId: entry.folder_id || "" });
 
   const thumbField = renderThumbnailField({
-    currentUrl: entry.thumbnail ? VaultAPI.mediaUrl(entry.id, entry.thumbnail) : null,
+    currentUrl: entry.thumbnail ? VaultAPI.mediaUrl(entry.id, entry.thumbnail, entry.updated_at) : null,
   });
 
   const markDirty = () => controller.setDirty(true);
-  for (const input of [nameInput, descInput, statusSelect, genTypeSelect, folderSelect, thumbField.fileInput]) {
+  for (const input of [nameInput, descInput, statusSelect, folderSelect, thumbField.fileInput]) {
     input.addEventListener("input", markDirty);
     input.addEventListener("change", markDirty);
   }
@@ -271,7 +264,8 @@ function renderEntryMetadataForm(controller, entry) {
   const leftCol = el("div", { className: "wv-settings-form-col" });
   leftCol.appendChild(formRow("Name", nameInput));
   leftCol.appendChild(formRow("Description", descInput));
-  leftCol.appendChild(el("div", { className: "wv-form-row-pair" }, [formRow("Status", statusSelect), formRow("Generation type", genTypeSelect)]));
+  leftCol.appendChild(formRow("Status", statusSelect));
+  leftCol.appendChild(formRow("Generation types", genTypePicker));
   leftCol.appendChild(formRow("Folder", folderSelect));
   leftCol.appendChild(formRow("Tags", tagInput));
   leftCol.appendChild(el("div", { className: "wv-form-row" }, [favSwitch]));
@@ -303,7 +297,7 @@ function renderEntryMetadataForm(controller, entry) {
             description: descInput.value,
             tags: tagInput.getTags(),
             status: statusSelect.value,
-            generation_type: genTypeSelect.value || null,
+            generation_types: genTypePicker.getSelected(),
             favorite: favSwitch.input.checked,
             folder_id: folderSelect.value === "__new__" ? null : folderSelect.value || null,
           };
@@ -418,7 +412,41 @@ function renderEntryMetadataForm(controller, entry) {
     [el("i", { className: "pi pi-trash" }), "Delete Entry"]
   );
 
+  const duplicateBtn = el(
+    "button",
+    {
+      className: "wv-btn",
+      onclick: async () => {
+        const name = await promptDialog({
+          title: "Duplicate entry",
+          message:
+            "Creates a new entry with the same thumbnail, tags, generation types, examples, and notes — plus just the current version. Give it a unique name:",
+          defaultValue: `${entry.name} copy`,
+          placeholder: "New entry name",
+          confirmText: "Duplicate",
+        });
+        if (name === null) return; // cancelled
+        const trimmed = name.trim();
+        if (!trimmed) {
+          showToast("Name is required.", "error");
+          return;
+        }
+        try {
+          const newEntry = await VaultAPI.duplicateEntry(entry.id, trimmed);
+          controller.setDirty(false);
+          await controller.refresh();
+          await controller.openEntry(newEntry.id);
+          showToast(`Duplicated as "${newEntry.name}".`, "success");
+        } catch (e) {
+          showToast(e.message, "error");
+        }
+      },
+    },
+    [el("i", { className: "pi pi-clone" }), "Duplicate"]
+  );
+
   actions.appendChild(el("div", { className: "wv-topbar-spacer" }));
+  actions.appendChild(duplicateBtn);
   actions.appendChild(archiveBtn);
   actions.appendChild(deleteBtn);
 

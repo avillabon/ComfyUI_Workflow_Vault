@@ -156,6 +156,17 @@ def write_folders(vault_root, folders):
     utils.atomic_write_json(os.path.join(vault_root, "folders.json"), {"folders": folders})
 
 
+def _coerce_generation_types(manifest):
+    """Read generation types as a list, transparently upgrading the legacy
+    scalar `generation_type` field so old manifests keep working until their
+    next save rewrites them to the plural `generation_types`."""
+    types = manifest.get("generation_types")
+    if isinstance(types, list):
+        return [t for t in types if isinstance(t, str)]
+    legacy = manifest.get("generation_type")
+    return [legacy] if isinstance(legacy, str) and legacy else []
+
+
 def build_entry_state(vault_root, slug):
     manifest = read_manifest(vault_root, slug)
     if not manifest:
@@ -167,7 +178,7 @@ def build_entry_state(vault_root, slug):
         "description": manifest.get("description", ""),
         "tags": manifest.get("tags", []),
         "status": manifest.get("status", "draft"),
-        "generation_type": manifest.get("generation_type"),
+        "generation_types": _coerce_generation_types(manifest),
         "favorite": bool(manifest.get("favorite", False)),
         "thumbnail": manifest.get("thumbnail"),
         "thumbnail_source": manifest.get("thumbnail_source"),

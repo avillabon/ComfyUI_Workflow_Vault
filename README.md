@@ -123,8 +123,7 @@ example media already filled in. You can switch to your own folder later from
 
 ### Quality of life
 
-- Version number, author credit, and links to the author's YouTube channel and
-  GitHub repo in the sidebar footer.
+- Version number, author credit, and link to GitHub repo in the sidebar footer.
 - Sidebar rail icons and the vault logo are tinted by the accent color.
 - Thumbnails use lazy loading for snappy grid performance at any library size.
 

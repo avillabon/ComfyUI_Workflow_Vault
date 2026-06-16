@@ -30,6 +30,16 @@ export function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
 }
 
+// Apply the user's accent color globally (on <html>) so it reaches both the
+// vault modal AND the sidebar rail buttons, which render outside the modal in
+// ComfyUI's own sidebar. Invalid/empty values are ignored, leaving the default.
+export function applyAccentColor(color) {
+  const c = String(color || "").trim();
+  if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(c)) {
+    document.documentElement.style.setProperty("--wv-accent", c);
+  }
+}
+
 // A labeled toggle switch. Returns the <label> element with `.input` exposed.
 export function toggleField(labelText, checked, onChange) {
   const input = el("input", { type: "checkbox", className: "wv-switch-input", checked });

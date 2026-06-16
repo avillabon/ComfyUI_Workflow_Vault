@@ -170,6 +170,7 @@ def build_entry_state(vault_root, slug):
         "generation_type": manifest.get("generation_type"),
         "favorite": bool(manifest.get("favorite", False)),
         "thumbnail": manifest.get("thumbnail"),
+        "thumbnail_source": manifest.get("thumbnail_source"),
         "folder_id": manifest.get("folder_id"),
         "current_version_id": manifest.get("current_version_id"),
         "created_at": manifest.get("created_at"),

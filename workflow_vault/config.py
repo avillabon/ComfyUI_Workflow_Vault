@@ -23,9 +23,27 @@ DEFAULT_VAULT_SETTINGS = {
     "default_thumbnail_behavior": "placeholder",
     "grid_columns": 3,
     "sort": "updated",
+    # Accent color applied to icons and the brand logo (CSS --wv-accent).
+    "accent_color": "#4d9fff",
+    # Auto-compress example images to smaller files as they're uploaded.
+    "compress_examples_on_upload": True,
+    "example_compress_format": "webp",  # "webp" | "jpeg"
+    # Re-encode the archival full-resolution thumbnail source to WebP (keeps
+    # full resolution and the embedded ComfyUI workflow; just smaller on disk).
+    "compress_thumbnail_source": True,
+    # Which optional fields appear on grid cards (cosmetic only).
+    "card_fields": {
+        "description": True,
+        "tags": True,
+        "versions": True,
+        "examples": True,
+        "date": True,
+    },
 }
 
 VALID_SORTS = ("updated", "created", "name")
+CARD_FIELD_KEYS = ("description", "tags", "versions", "examples", "date")
+VALID_COMPRESS_FORMATS = ("webp", "jpeg")
 
 
 def load_extension_config():
@@ -104,6 +122,13 @@ def load_vault_settings(vault_root):
     settings = utils.read_json(os.path.join(vault_root, "vault_settings.json"), default={})
     merged = dict(DEFAULT_VAULT_SETTINGS)
     merged.update(settings or {})
+    # Deep-merge card_fields so a partial stored value still carries defaults
+    # for any keys added in later versions.
+    card_fields = dict(DEFAULT_VAULT_SETTINGS["card_fields"])
+    stored = (settings or {}).get("card_fields")
+    if isinstance(stored, dict):
+        card_fields.update({k: bool(v) for k, v in stored.items() if k in CARD_FIELD_KEYS})
+    merged["card_fields"] = card_fields
     return merged
 
 

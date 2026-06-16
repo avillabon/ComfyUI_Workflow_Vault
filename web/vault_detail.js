@@ -11,6 +11,7 @@ import { renderExamplesTab } from "./vault_examples_tab.js";
 import { renderDocsTab } from "./vault_docs_tab.js";
 import { renderTagInput, tagCountsFrom } from "./vault_tag_input.js";
 import { renderThumbnailField } from "./vault_thumbnail_input.js";
+import { makeThumbnailFile } from "./vault_image.js";
 import { renderMarkdown } from "./vault_markdown.js";
 
 const TABS = [
@@ -123,7 +124,29 @@ function renderOverviewSummary(controller, entry) {
   // Thumbnail leads as the visual anchor.
   const thumb = el("div", { className: "wv-overview-thumb" });
   if (entry.thumbnail) {
-    thumb.appendChild(el("img", { src: VaultAPI.mediaUrl(entry.id, entry.thumbnail), alt: entry.name }));
+    thumb.appendChild(el("img", { src: VaultAPI.mediaUrl(entry.id, entry.thumbnail), alt: entry.name, loading: "lazy", decoding: "async" }));
+    // Reveal the thumbnail (and its archived original) in the OS file manager,
+    // matching the per-media button in the examples gallery.
+    thumb.appendChild(
+      el(
+        "button",
+        {
+          type: "button",
+          className: "wv-ex-copy-btn",
+          title: "Reveal thumbnail in folder",
+          "aria-label": "Reveal thumbnail in folder",
+          onclick: async (e) => {
+            e.stopPropagation();
+            try {
+              await VaultAPI.revealMedia(entry.id, entry.thumbnail);
+            } catch (err) {
+              showToast(err.message, "error");
+            }
+          },
+        },
+        [el("i", { className: "pi pi-folder-open" })]
+      )
+    );
   } else {
     thumb.appendChild(el("div", { className: "wv-overview-thumb-empty" }, [el("i", { className: "pi pi-image" })]));
   }
@@ -284,10 +307,15 @@ function renderEntryMetadataForm(controller, entry) {
             favorite: favSwitch.input.checked,
             folder_id: folderSelect.value === "__new__" ? null : folderSelect.value || null,
           };
-          formData.append("data", JSON.stringify(data));
-          if (thumbField.fileInput.files[0]) {
-            formData.append("thumbnail", thumbField.fileInput.files[0]);
+          const pickedThumb = thumbField.fileInput.files[0];
+          if (pickedThumb) {
+            // Small display thumbnail + untouched original (archival), both
+            // stamped with the original file's date.
+            formData.append("thumbnail", await makeThumbnailFile(pickedThumb));
+            formData.append("thumbnail_source", pickedThumb);
+            data.file_mtimes = { thumbnail: pickedThumb.lastModified, thumbnail_source: pickedThumb.lastModified };
           }
+          formData.append("data", JSON.stringify(data));
           await VaultAPI.updateEntryMetadata(entry.id, formData);
           controller.setDirty(false);
           await controller.refresh();

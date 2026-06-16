@@ -3,7 +3,7 @@
 // controller.render() and call back into controller methods for navigation.
 
 import { VaultAPI } from "./vault_api.js";
-import { el, clear, confirmDialog, showToast } from "./vault_dom.js";
+import { el, clear, confirmDialog, showToast, applyAccentColor } from "./vault_dom.js";
 import { renderLoading, renderInitView, renderTopbar, renderGridBody } from "./vault_modal.js";
 import { renderDetailView } from "./vault_detail.js";
 import { renderWizard } from "./vault_wizard.js";
@@ -72,6 +72,7 @@ export class VaultApp {
   async loadState() {
     try {
       this.state = await VaultAPI.getState();
+      applyAccentColor(this.state.settings?.accent_color);
       if (this.state.initialized && this.filters.showArchived === undefined) {
         this.filters.showArchived = !!this.state.settings?.show_archived;
       }

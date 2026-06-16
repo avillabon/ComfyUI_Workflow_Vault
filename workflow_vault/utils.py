@@ -48,6 +48,55 @@ def reveal_in_file_manager(path):
         return False, f"Could not reveal file: {e}"
 
 
+def set_file_times(path, mtime, ctime=None):
+    """Stamp a file's modified/access time (and, on Windows, its creation time)
+    so a converted file keeps its source file's date. Best-effort: never raises.
+
+    `mtime`/`ctime` are POSIX timestamps (seconds). `ctime` defaults to `mtime`
+    (uploads only know one date); the batch path passes the real creation time.
+    """
+    if mtime is None:
+        return
+    try:
+        os.utime(path, (mtime, mtime))
+    except OSError:
+        pass
+    if os.name == "nt":
+        _set_windows_creation_time(path, mtime if ctime is None else ctime)
+
+
+def _set_windows_creation_time(path, ctime):
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        # POSIX seconds -> Windows FILETIME (100ns ticks since 1601-01-01).
+        ticks = int((ctime + 11644473600) * 10_000_000)
+        if ticks < 0:
+            return
+        ft = wintypes.FILETIME(ticks & 0xFFFFFFFF, (ticks >> 32) & 0xFFFFFFFF)
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.CreateFileW.restype = wintypes.HANDLE
+        GENERIC_WRITE = 0x40000000
+        OPEN_EXISTING = 3
+        FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+        INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+        handle = kernel32.CreateFileW(
+            ctypes.c_wchar_p(str(path)), GENERIC_WRITE, 0, None,
+            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, None,
+        )
+        if not handle or handle == INVALID_HANDLE_VALUE:
+            return
+        try:
+            kernel32.SetFileTime(handle, ctypes.byref(ft), None, None)
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        pass
+
+
 def now_iso():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 

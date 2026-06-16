@@ -3,6 +3,7 @@
 import os
 import shutil
 
+from . import config
 from . import examples as examples_mod
 from . import folders as folders_mod
 from . import media as media_mod
@@ -12,6 +13,13 @@ VALID_STATUSES = {"draft", "experimental", "stable", "production", "archived"}
 VALID_GENERATION_TYPES = {"image", "video", "audio", "3d_model", "llm", "api_nodes"}
 
 _UNSET = object()
+
+
+def _should_compress_source(vault_root):
+    """Whether to re-encode the archival thumbnail source to WebP on save."""
+    if not media_mod.pillow_available():
+        return False
+    return bool(config.load_vault_settings(vault_root).get("compress_thumbnail_source", True))
 
 
 def normalize_tags(tags):
@@ -99,6 +107,8 @@ def create_entry(vault_root, data):
         "generation_type": generation_type,
         "favorite": bool(data.get("favorite", False)),
         "thumbnail": None,
+        "thumbnail_source": None,
+        "thumbnail_source_compressed": False,
         "folder_id": data.get("folder_id"),
         "current_version_id": None,
         "created_at": now,
@@ -122,11 +132,23 @@ def create_entry(vault_root, data):
 
     thumbnail = data.get("thumbnail")
     if thumbnail:
-        rel, merr = media_mod.save_thumbnail(vault_root, slug, thumbnail["bytes"], thumbnail["filename"])
+        rel, merr = media_mod.save_thumbnail(vault_root, slug, thumbnail["bytes"], thumbnail["filename"], mtime=thumbnail.get("mtime"))
         if merr:
             shutil.rmtree(edir, ignore_errors=True)
             return None, merr
         manifest["thumbnail"] = rel
+
+    # Archival full-resolution original is best-effort: a failure here must not
+    # discard the whole entry, since the display thumbnail already succeeded.
+    thumbnail_source = data.get("thumbnail_source")
+    if thumbnail_source:
+        rel, src_compressed, merr = media_mod.save_thumbnail_source(
+            vault_root, slug, thumbnail_source["bytes"], thumbnail_source["filename"],
+            mtime=thumbnail_source.get("mtime"), compress=_should_compress_source(vault_root)
+        )
+        if not merr:
+            manifest["thumbnail_source"] = rel
+            manifest["thumbnail_source_compressed"] = src_compressed
 
     storage.write_manifest(vault_root, slug, manifest)
 
@@ -155,7 +177,7 @@ def create_entry(vault_root, data):
     return entry_state, None
 
 
-def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None):
+def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None, thumbnail_source_file=None):
     """Returns (new_slug, error)."""
     new_slug = slug
 
@@ -205,10 +227,21 @@ def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None)
         manifest["folder_id"] = data["folder_id"]
 
     if thumbnail_file:
-        rel, merr = media_mod.save_thumbnail(vault_root, new_slug, thumbnail_file["bytes"], thumbnail_file["filename"])
+        rel, merr = media_mod.save_thumbnail(
+            vault_root, new_slug, thumbnail_file["bytes"], thumbnail_file["filename"], mtime=thumbnail_file.get("mtime")
+        )
         if merr:
             return new_slug, merr
         manifest["thumbnail"] = rel
+
+    if thumbnail_source_file:
+        rel, src_compressed, merr = media_mod.save_thumbnail_source(
+            vault_root, new_slug, thumbnail_source_file["bytes"], thumbnail_source_file["filename"],
+            mtime=thumbnail_source_file.get("mtime"), compress=_should_compress_source(vault_root)
+        )
+        if not merr:
+            manifest["thumbnail_source"] = rel
+            manifest["thumbnail_source_compressed"] = src_compressed
 
     if "notes" in data:
         storage.write_notes(vault_root, new_slug, normalize_notes(data["notes"]))
@@ -227,6 +260,68 @@ def set_archived(vault_root, manifest, slug, archived, restore_status=None):
         manifest.pop("_pre_archive_status", None)
     manifest["updated_at"] = utils.now_iso()
     storage.write_manifest(vault_root, slug, manifest)
+
+
+def compress_all_thumbnail_sources(vault_root):
+    """Re-encode every existing full-resolution thumbnail source across the
+    vault to WebP, in place. Always WebP (metadata-preserving).
+
+    Idempotent: sources already flagged compressed are skipped, and per-entry
+    failures are ignored. The converted file keeps the source's original
+    modified AND created dates. Returns the same stats shape as
+    examples.compress_all_examples so callers can sum the two."""
+    examined = 0
+    converted = 0
+    bytes_before = 0
+    bytes_after = 0
+    if not media_mod.pillow_available():
+        return {"examined": 0, "converted": 0, "skipped": 0, "bytes_before": 0, "bytes_after": 0}
+    for slug in storage.list_entry_slugs(vault_root):
+        manifest = storage.read_manifest(vault_root, slug)
+        if not manifest:
+            continue
+        rel = manifest.get("thumbnail_source")
+        if not rel:
+            continue
+        examined += 1
+        if manifest.get("thumbnail_source_compressed"):
+            continue  # already compressed — never re-encode (generation loss)
+        edir = storage.entry_dir(vault_root, slug)
+        abs_path = os.path.normpath(os.path.join(edir, rel.replace("\\", "/")))
+        if not utils.is_path_inside(edir, abs_path) or not os.path.isfile(abs_path):
+            continue
+        try:
+            with open(abs_path, "rb") as fh:
+                data = fh.read()
+            src_mtime = os.path.getmtime(abs_path)
+            src_ctime = os.path.getctime(abs_path)
+        except OSError:
+            continue
+        new_rel, was_compressed, merr = media_mod.save_thumbnail_source(
+            vault_root, slug, data, os.path.basename(rel), mtime=src_mtime, compress=True
+        )
+        if merr or not was_compressed:
+            continue
+        new_abs = os.path.join(edir, new_rel)
+        # Keep the source file's original modified + created dates.
+        utils.set_file_times(new_abs, src_mtime, ctime=src_ctime)
+        try:
+            new_size = os.path.getsize(new_abs)
+        except OSError:
+            new_size = 0
+        manifest["thumbnail_source"] = new_rel
+        manifest["thumbnail_source_compressed"] = True
+        storage.write_manifest(vault_root, slug, manifest)
+        bytes_before += len(data)
+        bytes_after += new_size
+        converted += 1
+    return {
+        "examined": examined,
+        "converted": converted,
+        "skipped": examined - converted,
+        "bytes_before": bytes_before,
+        "bytes_after": bytes_after,
+    }
 
 
 # ---------------------------------------------------------------------------

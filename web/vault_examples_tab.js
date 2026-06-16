@@ -99,15 +99,23 @@ function renderAddExampleForm(controller, entry, onClose) {
         createBtn.disabled = true;
         try {
           const formData = new FormData();
+          const mtimes = {};
+          picker.getByRole("input").forEach((f, i) => {
+            formData.append(`input_${i}`, f);
+            mtimes[`input_${i}`] = f.lastModified;
+          });
+          picker.getByRole("output").forEach((f, i) => {
+            formData.append(`output_${i}`, f);
+            mtimes[`output_${i}`] = f.lastModified;
+          });
           formData.append(
             "data",
             JSON.stringify({
               title: titleInput.value,
               notes: notesInput.value,
+              file_mtimes: mtimes,
             })
           );
-          picker.getByRole("input").forEach((f, i) => formData.append(`input_${i}`, f));
-          picker.getByRole("output").forEach((f, i) => formData.append(`output_${i}`, f));
           const result = await VaultAPI.createExample(entry.id, formData);
           await controller.refresh();
           showToast("Example added.", "success");
@@ -306,9 +314,16 @@ function renderAddMediaRow(controller, entry, example) {
         uploading = true;
         try {
           const formData = new FormData();
-          formData.append("data", JSON.stringify({}));
-          picker.getByRole("input").forEach((f, i) => formData.append(`new_input_${i}`, f));
-          picker.getByRole("output").forEach((f, i) => formData.append(`new_output_${i}`, f));
+          const mtimes = {};
+          picker.getByRole("input").forEach((f, i) => {
+            formData.append(`new_input_${i}`, f);
+            mtimes[`new_input_${i}`] = f.lastModified;
+          });
+          picker.getByRole("output").forEach((f, i) => {
+            formData.append(`new_output_${i}`, f);
+            mtimes[`new_output_${i}`] = f.lastModified;
+          });
+          formData.append("data", JSON.stringify({ file_mtimes: mtimes }));
           const result = await VaultAPI.updateExample(entry.id, example.id, formData);
           showToast("Media added.", "success");
           if (result.skipped_files?.length) {

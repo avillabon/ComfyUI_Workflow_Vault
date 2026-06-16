@@ -6,10 +6,11 @@ import { VaultAPI } from "./vault_api.js";
 import { openCurrentVersion } from "./vault_detail.js";
 import { renderFolderTree, folderPath } from "./vault_folders.js";
 
-// Bump this on each release; surfaced in the sidebar footer credit.
-export const VAULT_VERSION = "2026.06.15";
+// Bump this on each edit to the current date (CalVer); shown in the footer.
+export const VAULT_VERSION = "2026.06.16";
 export const AUTHOR_NAME = "Alex Villabón";
 export const AUTHOR_URL = "https://www.youtube.com/@alexvillabon";
+export const REPO_URL = "https://github.com/avillabon/ComfyUI_Workflow_Vault";
 
 export const STATUS_LABELS = {
   draft: "Draft",
@@ -57,7 +58,26 @@ export function renderInitView(controller) {
     type: "text",
     placeholder: "e.g. C:\\Users\\you\\Documents\\ComfyUI Workflow Vault",
   });
-  wrap.appendChild(input);
+  const browseBtn = el(
+    "button",
+    {
+      className: "wv-btn",
+      title: "Browse for a folder",
+      onclick: async () => {
+        browseBtn.disabled = true;
+        try {
+          const res = await VaultAPI.browseFolder();
+          if (res.path) input.value = res.path;
+        } catch {
+          // silently ignore — user may have cancelled or tkinter unavailable
+        } finally {
+          browseBtn.disabled = false;
+        }
+      },
+    },
+    [el("i", { className: "pi pi-folder-open" }), " Browse…"]
+  );
+  wrap.appendChild(el("div", { className: "wv-init-path-row" }, [input, browseBtn]));
 
   const status = el("div", { className: "wv-init-status" });
   wrap.appendChild(status);
@@ -137,11 +157,18 @@ export function renderTopbar(controller) {
 
   // Brand cell aligns with the sidebar column; controls cell aligns with the
   // main content area (so the search/filters never overlap the sidebar).
+  // Logo is a masked element (not <img>) so it tints with --wv-accent like the
+  // rail button and the rest of the icons.
   const brand = el("div", { className: "wv-topbar-brand" }, [
-    el("img", { className: "wv-topbar-title-logo", src: new URL("./assets/logo.svg", import.meta.url).href, alt: "" }),
+    el("span", { className: "wv-topbar-title-logo", role: "img", "aria-label": "Workflow Vault logo" }),
     el("span", { className: "wv-topbar-title-text" }, ["Workflow Vault"]),
   ]);
   const controls = el("div", { className: "wv-topbar-controls" });
+
+  // Always a fixed two-row layout (no reflow on resize):
+  //   Row 1: search (left)  ...........  New Entry · settings · close (right)
+  //   Row 2: sort · status · favorites · archived (left)  .....  per-row (right)
+  const spacer = () => el("div", { className: "wv-topbar-spacer" });
 
   const search = el("input", {
     className: "wv-input wv-search",
@@ -153,7 +180,56 @@ export function renderTopbar(controller) {
       controller.render();
     },
   });
-  controls.appendChild(search);
+
+  const newEntryBtn = el(
+    "button",
+    {
+      className: "wv-btn wv-btn-primary",
+      onclick: () =>
+        controller.openWizard({
+          mode: "full",
+          defaultFolderId: typeof controller.filters.folderId === "string" ? controller.filters.folderId : null,
+        }),
+    },
+    ["+ New Entry"]
+  );
+  const settingsBtn = el(
+    "button",
+    { className: "wv-icon-btn wv-icon-btn-lg", title: "Vault settings", onclick: () => controller.openSettings() },
+    [el("i", { className: "pi pi-cog" })]
+  );
+  const closeBtn = el(
+    "button",
+    { className: "wv-icon-btn wv-icon-btn-lg", title: "Close", onclick: () => controller.requestClose() },
+    [el("i", { className: "pi pi-times" })]
+  );
+
+  const currentSort = controller.state.settings?.sort || "updated";
+  const SORT_OPTIONS = [
+    ["updated", "Recently updated"],
+    ["created", "Recently created"],
+    ["name", "Name (A–Z)"],
+  ];
+  const sortSelect = el(
+    "select",
+    {
+      className: "wv-input wv-sort-select",
+      title: "Sort workflows",
+      "aria-label": "Sort workflows",
+      onchange: async (e) => {
+        const value = e.target.value;
+        controller.state.settings = controller.state.settings || {};
+        controller.state.settings.sort = value;
+        controller.render();
+        try {
+          await VaultAPI.postSettings({ sort: value });
+        } catch (err) {
+          showToast(err.message, "error");
+        }
+      },
+    },
+    SORT_OPTIONS.map(([value, label]) => el("option", { value, selected: value === currentSort }, [label]))
+  );
 
   const statusSelect = el(
     "select",
@@ -169,96 +245,21 @@ export function renderTopbar(controller) {
       ...STATUS_ORDER.map((value) => el("option", { value, selected: filters.status === value }, [STATUS_LABELS[value]])),
     ]
   );
-  controls.appendChild(statusSelect);
 
-  controls.appendChild(
-    toggleField("Favorites", !!filters.favoritesOnly, (checked) => {
-      controller.filters.favoritesOnly = checked;
-      controller.render();
-    })
-  );
+  const favoritesToggle = toggleField("Favorites", !!filters.favoritesOnly, (checked) => {
+    controller.filters.favoritesOnly = checked;
+    controller.render();
+  });
 
-  controls.appendChild(
-    toggleField("Show archived", !!filters.showArchived, (checked) => {
-      controller.filters.showArchived = checked;
-      controller.render();
-    })
-  );
+  const archivedToggle = toggleField("Show archived", !!filters.showArchived, (checked) => {
+    controller.filters.showArchived = checked;
+    controller.render();
+  });
 
-  controls.appendChild(el("div", { className: "wv-topbar-spacer" }));
-
-  const currentSort = controller.state.settings?.sort || "updated";
-  const SORT_OPTIONS = [
-    ["updated", "Recently updated"],
-    ["created", "Recently created"],
-    ["name", "Name (A–Z)"],
-  ];
-  controls.appendChild(
-    el(
-      "select",
-      {
-        className: "wv-input wv-sort-select",
-        title: "Sort workflows",
-        "aria-label": "Sort workflows",
-        onchange: async (e) => {
-          const value = e.target.value;
-          controller.state.settings = controller.state.settings || {};
-          controller.state.settings.sort = value;
-          controller.render();
-          try {
-            await VaultAPI.postSettings({ sort: value });
-          } catch (err) {
-            showToast(err.message, "error");
-          }
-        },
-      },
-      SORT_OPTIONS.map(([value, label]) => el("option", { value, selected: value === currentSort }, [label]))
-    )
-  );
-
-  const gridColumns = controller.state.settings?.grid_columns || 3;
-  controls.appendChild(
-    el(
-      "select",
-      {
-        className: "wv-input wv-grid-density",
-        title: "Workflows per row",
-        onchange: async (e) => {
-          const value = Number(e.target.value);
-          controller.state.settings = controller.state.settings || {};
-          controller.state.settings.grid_columns = value;
-          controller.render();
-          try {
-            await VaultAPI.postSettings({ grid_columns: value });
-          } catch (err) {
-            showToast(err.message, "error");
-          }
-        },
-      },
-      [2, 3, 4].map((n) => el("option", { value: n, selected: n === gridColumns }, [`${n} per row`]))
-    )
-  );
-
-  controls.appendChild(
-    el(
-      "button",
-      {
-        className: "wv-btn wv-btn-primary",
-        onclick: () =>
-          controller.openWizard({
-            mode: "full",
-            defaultFolderId: typeof controller.filters.folderId === "string" ? controller.filters.folderId : null,
-          }),
-      },
-      ["+ New Entry"]
-    )
-  );
-  controls.appendChild(
-    el("button", { className: "wv-icon-btn wv-icon-btn-lg", title: "Vault settings", onclick: () => controller.openSettings() }, [el("i", { className: "pi pi-cog" })])
-  );
-  controls.appendChild(
-    el("button", { className: "wv-icon-btn wv-icon-btn-lg", title: "Close", onclick: () => controller.requestClose() }, [el("i", { className: "pi pi-times" })])
-  );
+  const row1 = el("div", { className: "wv-topbar-row" }, [search, spacer(), newEntryBtn, settingsBtn, closeBtn]);
+  const row2 = el("div", { className: "wv-topbar-row" }, [sortSelect, statusSelect, favoritesToggle, archivedToggle]);
+  controls.appendChild(row1);
+  controls.appendChild(row2);
 
   bar.appendChild(brand);
   bar.appendChild(controls);
@@ -297,20 +298,16 @@ export function renderGridBody(controller) {
   return body;
 }
 
-// Bottom-of-sidebar credit: version + author link (opens in a new tab).
+// Bottom-of-sidebar credit: version, author link, and repo link (new tab).
 function renderSidebarFooter() {
+  const footerLink = (href, children) =>
+    el("a", { className: "wv-sidebar-footer-link", href, target: "_blank", rel: "noopener noreferrer" }, children);
   return el("div", { className: "wv-sidebar-footer" }, [
     el("div", { className: "wv-sidebar-footer-version" }, [`Workflow Vault v${VAULT_VERSION}`]),
-    el(
-      "a",
-      {
-        className: "wv-sidebar-footer-credit",
-        href: AUTHOR_URL,
-        target: "_blank",
-        rel: "noopener noreferrer",
-      },
-      [`by ${AUTHOR_NAME} `, el("i", { className: "pi pi-external-link" })]
-    ),
+    el("div", { className: "wv-sidebar-footer-links" }, [
+      footerLink(AUTHOR_URL, [`by ${AUTHOR_NAME} `, el("i", { className: "pi pi-external-link" })]),
+      footerLink(REPO_URL, [el("i", { className: "pi pi-github" }), "GitHub"]),
+    ]),
   ]);
 }
 
@@ -403,6 +400,32 @@ function renderBreadcrumb(controller) {
     }
   }
 
+  // Per-row (grid density) control lives on the breadcrumb line, pushed to the
+  // right edge by a flexible spacer.
+  const gridColumns = controller.state.settings?.grid_columns || 3;
+  const densitySelect = el(
+    "select",
+    {
+      className: "wv-input wv-grid-density",
+      title: "Workflows per row",
+      "aria-label": "Workflows per row",
+      onchange: async (e) => {
+        const value = Number(e.target.value);
+        controller.state.settings = controller.state.settings || {};
+        controller.state.settings.grid_columns = value;
+        controller.render();
+        try {
+          await VaultAPI.postSettings({ grid_columns: value });
+        } catch (err) {
+          showToast(err.message, "error");
+        }
+      },
+    },
+    [2, 3, 4].map((n) => el("option", { value: n, selected: n === gridColumns }, [`${n} per row`]))
+  );
+  row.appendChild(el("div", { className: "wv-topbar-spacer" }));
+  row.appendChild(densitySelect);
+
   return row;
 }
 
@@ -466,7 +489,7 @@ function renderCard(entry, controller) {
 
   const thumb = el("div", { className: "wv-card-thumb" });
   if (entry.thumbnail) {
-    thumb.appendChild(el("img", { src: VaultAPI.mediaUrl(entry.id, entry.thumbnail), alt: entry.name }));
+    thumb.appendChild(el("img", { src: VaultAPI.mediaUrl(entry.id, entry.thumbnail), alt: entry.name, loading: "lazy", decoding: "async" }));
   } else if (controller.state.settings?.default_thumbnail_behavior !== "blank") {
     thumb.appendChild(el("div", { className: "wv-card-thumb-placeholder" }, [el("i", { className: "pi pi-image" })]));
   }
@@ -520,29 +543,46 @@ function renderCard(entry, controller) {
   const body = el("div", { className: "wv-card-body" });
   body.appendChild(el("div", { className: "wv-card-title", title: entry.name }, [entry.name]));
 
-  if (entry.description) {
+  // Cosmetic field visibility — these toggles only hide/show, they never change
+  // the underlying entry data. Missing/undefined keys default to visible.
+  const cf = controller.state.settings?.card_fields || {};
+  const show = (key) => cf[key] !== false;
+
+  if (show("description") && entry.description) {
     body.appendChild(el("div", { className: "wv-card-desc" }, [entry.description]));
   }
 
-  if (entry.tags && entry.tags.length) {
+  if (show("tags") && entry.tags && entry.tags.length) {
     body.appendChild(el("div", { className: "wv-card-tags" }, entry.tags.map((t) => el("span", { className: "wv-tag" }, [t]))));
   }
 
   const versionCount = (entry.versions || []).length;
   const exampleCount = (entry.examples || []).length;
-  body.appendChild(
-    el("div", { className: "wv-card-footer" }, [
+  const footerItems = [];
+  if (show("versions")) {
+    footerItems.push(
       el("span", { className: "wv-card-footer-item" }, [
         el("i", { className: "pi pi-clone" }),
         `${versionCount} version${versionCount === 1 ? "" : "s"}`,
-      ]),
+      ])
+    );
+  }
+  if (show("examples")) {
+    footerItems.push(
       el("span", { className: "wv-card-footer-item" }, [
         el("i", { className: "pi pi-images" }),
         `${exampleCount} example${exampleCount === 1 ? "" : "s"}`,
-      ]),
-      el("span", { className: "wv-card-footer-item" }, [el("i", { className: "pi pi-clock" }), formatDateOnly(entry.updated_at)]),
-    ])
-  );
+      ])
+    );
+  }
+  if (show("date")) {
+    footerItems.push(
+      el("span", { className: "wv-card-footer-item" }, [el("i", { className: "pi pi-clock" }), formatDateOnly(entry.updated_at)])
+    );
+  }
+  if (footerItems.length) {
+    body.appendChild(el("div", { className: "wv-card-footer" }, footerItems));
+  }
 
   card.appendChild(body);
   return card;

@@ -3,7 +3,8 @@
 // Workflow) that launch in a single click.
 
 import { app } from "../../scripts/app.js";
-import { el, clear } from "./vault_dom.js";
+import { el, clear, applyAccentColor } from "./vault_dom.js";
+import { VaultAPI } from "./vault_api.js";
 import { vaultApp } from "./vault_app.js";
 
 function injectStylesheet() {
@@ -65,6 +66,13 @@ app.registerExtension({
   name: "Comfy.WorkflowVault",
   setup() {
     injectStylesheet();
+
+    // Tint the rail buttons with the saved accent color on startup, before the
+    // vault is ever opened. Best-effort: a missing/unconfigured vault just
+    // leaves the default accent in place.
+    VaultAPI.getState()
+      .then((s) => applyAccentColor(s?.settings?.accent_color))
+      .catch(() => {});
 
     // Registered Save first, then Vault, and with ascending `order` values so
     // they sink to the bottom of the rail: Save above Vault, Vault last.

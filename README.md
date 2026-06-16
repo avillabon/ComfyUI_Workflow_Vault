@@ -13,17 +13,20 @@ folder you choose on disk. No database, no account, no cloud sync.
    you end up with `ComfyUI/custom_nodes/Comfy_Workflow_Vault/`.
 2. Restart ComfyUI.
 3. No extra Python dependencies are required — the backend uses only the
-   standard library plus `aiohttp`, which ComfyUI already bundles.
+   standard library plus `aiohttp` and `Pillow`, both of which ComfyUI already
+   bundles. (Pillow powers optional image compression; the vault still runs
+   without it.)
 
 ## First run
 
 Two **Workflow Vault** buttons appear in the left sidebar rail:
 
-- 🗄 **Vault** — opens the vault to browse and manage your saved workflows.
-- 💾 **Save** — saves the current canvas to the vault. The Save wizard lets you
-  create a new entry or update an existing one (overwrite the current version,
-  or add a new version). If the canvas was opened from a vault entry, Save
-  defaults to updating that entry.
+- ⚡ **Vault** (lightning-bolt logo) — opens the vault to browse and manage your
+  saved workflows.
+- 💾 **Save** (save icon) — saves the current canvas to the vault. The Save
+  wizard lets you create a new entry or update an existing one (overwrite the
+  current version, or add a new version). If the canvas was opened from a vault
+  entry, Save defaults to updating that entry.
 
 The first time you open the vault, you'll be asked to choose a folder on disk
 to use as your vault root. This folder is remembered for future sessions.
@@ -37,37 +40,93 @@ example media already filled in. You can switch to your own folder later from
 
 ## Features
 
-- **Grid view** with search, a status filter, Favorites / Show-archived
-  toggles, a nested folder tree and a **Generation Type** filter in the
-  sidebar, sort controls, and a per-row density control (2, 3, or 4 across).
-  Each card shows the status, generation type, a favorite toggle, and a
-  one-click "open workflow" button.
-- **Entry detail view** with tabs:
-  - **Overview** — a read-only summary (description, tags, status, folder,
-    thumbnail) plus "Open folder" / "Export (.zip)" actions, followed by a
-    gallery of all example media (images, video, audio). Each example supports
-    a before/after compare slider for image input/output pairs and a
-    "reveal in folder" action; notes show alongside the media.
-  - **Notes** — one or more Markdown notes per entry (stored together in a
-    single `notes.json`), shown as sub-tabs you can add, rename, and delete,
-    rendered as Markdown with an Edit toggle for in-place editing.
-  - **Settings** — segmented sub-tabs:
-    - **Workflow Details** — editable metadata (name, description, tags with
-      autocomplete, status, generation type, folder, a favorite switch, and a
-      thumbnail) plus stats (created/updated dates, version/example counts).
-    - **Versions** — full version history (add a new version, overwrite the
-      current one, promote, edit notes).
-    - **Examples** — add/edit/delete examples and their input/output media,
-      with previews, drag to move media within or between Inputs/Outputs, and
-      up/down reordering of examples.
-- **Folder management** — create, rename, move, and delete nested folders
-  from the sidebar, including inline "create new folder" from any folder
-  picker.
-- **Global vault settings** — change the vault root folder, set defaults for
-  new entries (status, thumbnail behavior), and view basic vault stats.
-- **Save wizard** — save the current canvas as a new entry, or as a new
-  version / overwrite of an existing entry, optionally attaching notes and one
-  or more examples (input/output media) in the same step.
+### Browse & search
+
+- **Grid view** with search, status filter, Favorites and Show-archived
+  toggles, sort controls (by name, created date, or last updated), and a
+  **per-row density selector** (2, 3, or 4 columns) on the breadcrumb line.
+- **Sidebar** shows a nested folder tree and a **Generation Type** filter
+  (Image, Video, Audio, 3D Model, LLM, API Nodes) with live counts.
+- **Favorites** — star any entry from the grid card or detail view; favorites
+  pin to the top in "last updated" sort order.
+- **Grid cards** show the thumbnail, entry name, status, generation type badge,
+  favorite toggle, and a one-click "open workflow" button. Optional card fields
+  (description, tags, version count, example count, date) are individually
+  toggleable in settings for a cleaner look.
+- **Accent color** — a single color tints all icons and the logo throughout the
+  UI. Choose from preset swatches or a custom color picker; changes preview
+  live before saving.
+
+### Entry detail
+
+- **Overview tab** — a read-only summary (description, tags, status, folder,
+  generation type, thumbnail with an "Open folder" button) followed by a full
+  gallery of example media. Each example supports a before/after compare slider
+  for image input/output pairs, a "reveal in folder" button per media item, and
+  per-example notes.
+- **Notes tab** — one or more Markdown notes per entry, shown as sub-tabs you
+  can add, rename, and delete. Notes render as Markdown with a toggle for
+  in-place editing.
+- **Settings tab** with three sub-tabs:
+  - **Workflow Details** — edit name, description, tags (with autocomplete),
+    status, generation type, folder, favorite toggle, and thumbnail, plus
+    read-only stats (created/updated dates, version count, example count).
+  - **Versions** — full version history: add a new version, overwrite the
+    current one, promote a past version, and edit per-version notes.
+  - **Examples** — add, edit, delete, and reorder examples and their
+    input/output media, with live previews and drag-to-move between Inputs and
+    Outputs.
+
+### Save wizard
+
+- Save the current canvas as a **new entry** or as a **new version /
+  overwrite** of an existing one, with optional notes, examples (input/output
+  media), status, generation type, folder, favorite toggle, and a thumbnail —
+  all in one step.
+- Thumbnails are **client-side downscaled** to 512 px max (WebP at 0.8
+  quality; JPEG fallback) for a snappy display copy, while the full-resolution
+  original is kept as a separate archival source. Original file dates are
+  preserved on both.
+
+### Folder management
+
+- Create, rename, move, and delete nested folders from the sidebar.
+- Inline **"Create new folder"** option in any folder picker.
+
+### Image compression (Pillow)
+
+- **Example images** are automatically re-encoded on upload to a smaller
+  WebP or JPEG (WebP by default — keeps transparency and the embedded ComfyUI
+  workflow so images stay drag-droppable into ComfyUI). Toggle on/off per vault.
+- **Thumbnail source** — the full-resolution archival original is saved as a
+  smaller WebP that keeps transparency and the same resolution, with the
+  ComfyUI workflow still embedded — so it stays drag-droppable into ComfyUI.
+- **Batch compression** — a single action in Settings re-encodes all existing
+  example images and thumbnail sources across the vault. Idempotent (files
+  already compressed are skipped) and shows a completion summary (files
+  converted, bytes before/after, percentage saved).
+- Original file dates (modified and created) are always preserved on converted
+  files.
+
+### Global vault settings
+
+- **Vault location** — change or re-point the vault root folder at any time.
+- **Defaults** — set the default status for new entries and the placeholder
+  behavior when an entry has no thumbnail.
+- **Card display** — toggle individual grid-card fields (Description, Tags,
+  Version count, Example count, Date) on or off for a minimal look.
+- **Appearance** — accent color (preset swatches + custom picker, live preview).
+- **Storage** — compression toggles and format choice (WebP/JPEG for examples),
+  batch compress action.
+- **Tags** — rename, merge (rename to an existing tag), or delete tags across
+  all entries.
+
+### Quality of life
+
+- Version number, author credit, and links to the author's YouTube channel and
+  GitHub repo in the sidebar footer.
+- Sidebar rail icons and the vault logo are tinted by the accent color.
+- Thumbnails use lazy loading for snappy grid performance at any library size.
 
 ## On-disk layout
 
@@ -79,7 +138,9 @@ example media already filled in. You can switch to your own folder later from
     <entry_slug>/
       manifest.json
       notes.json
-      thumbnails/cover.<ext>
+      thumbnails/
+        cover.<ext>         ← display thumbnail (downscaled)
+        source.<ext>        ← full-resolution archival original
       versions/
         v001/{version.json, workflow.json}
         ...

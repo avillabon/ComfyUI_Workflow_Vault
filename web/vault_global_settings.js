@@ -1,9 +1,30 @@
 // Vault-wide settings: stats, vault location, defaults, and tag management,
 // laid out as a constrained column of panels.
 
-import { el, showToast, confirmDialog, promptDialog } from "./vault_dom.js";
+import { el, showToast, confirmDialog, promptDialog, applyAccentColor } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
 import { STATUS_LABELS, STATUS_ORDER } from "./vault_modal.js";
+
+// Optional grid-card fields the user can hide for a more minimal look.
+const CARD_FIELD_DEFS = [
+  ["description", "Description"],
+  ["tags", "Tags"],
+  ["versions", "Version count"],
+  ["examples", "Example count"],
+  ["date", "Updated date"],
+];
+
+// Curated accent presets shown as swatches alongside the custom color picker.
+const PRESET_ACCENTS = ["#4d9fff", "#22c55e", "#a855f7", "#f59e0b", "#ef4444", "#ec4899", "#14b8a6"];
+const DEFAULT_ACCENT = "#4d9fff";
+
+function formatBytes(n) {
+  n = Math.max(0, n || 0);
+  if (n >= 1024 ** 3) return (n / 1024 ** 3).toFixed(2) + " GB";
+  if (n >= 1024 ** 2) return (n / 1024 ** 2).toFixed(1) + " MB";
+  if (n >= 1024) return (n / 1024).toFixed(0) + " KB";
+  return n + " B";
+}
 
 function panel(title, icon, hint) {
   const p = el("div", { className: "wv-vs-panel" });
@@ -29,7 +50,20 @@ export function renderGlobalSettings(controller) {
 
   const header = el("div", { className: "wv-detail-header" });
   header.appendChild(
-    el("button", { className: "wv-icon-btn wv-icon-btn-lg", title: "Back to vault", "aria-label": "Back to vault", onclick: () => controller.setView("grid") }, [el("i", { className: "pi pi-arrow-left" })])
+    el(
+      "button",
+      {
+        className: "wv-icon-btn wv-icon-btn-lg",
+        title: "Back to vault",
+        "aria-label": "Back to vault",
+        onclick: () => {
+          // Revert any unsaved accent-color preview to the persisted value.
+          applyAccentColor(state.settings?.accent_color);
+          controller.setView("grid");
+        },
+      },
+      [el("i", { className: "pi pi-arrow-left" })]
+    )
   );
   header.appendChild(el("div", { className: "wv-detail-title-area" }, [el("div", { className: "wv-detail-title" }, ["Vault Settings"])]));
   header.appendChild(el("div", { className: "wv-topbar-spacer" }));
@@ -50,6 +84,25 @@ export function renderGlobalSettings(controller) {
   // --- Vault location ---
   const locationInput = el("input", { className: "wv-input wv-mono", type: "text", placeholder: "New vault folder path", value: state.vault_root || "" });
   const locationStatus = el("div", { className: "wv-init-status" });
+  const locationBrowseBtn = el(
+    "button",
+    {
+      className: "wv-btn",
+      title: "Browse for a folder",
+      onclick: async () => {
+        locationBrowseBtn.disabled = true;
+        try {
+          const res = await VaultAPI.browseFolder();
+          if (res.path) locationInput.value = res.path;
+        } catch {
+          // silently ignore
+        } finally {
+          locationBrowseBtn.disabled = false;
+        }
+      },
+    },
+    [el("i", { className: "pi pi-folder-open" }), " Browse…"]
+  );
   const changeBtn = el("button", { className: "wv-btn", onclick: () => changeVaultRoot(locationInput.value, false) }, ["Change…"]);
 
   async function changeVaultRoot(path, confirm) {
@@ -78,7 +131,7 @@ export function renderGlobalSettings(controller) {
   }
 
   const locPanel = panel("Vault location", "pi pi-folder", "Where entries and media are stored on disk.");
-  locPanel.appendChild(el("div", { className: "wv-vs-location-row" }, [locationInput, changeBtn]));
+  locPanel.appendChild(el("div", { className: "wv-vs-location-row" }, [locationInput, locationBrowseBtn, changeBtn]));
   locPanel.appendChild(locationStatus);
   body.appendChild(locPanel);
 
@@ -103,6 +156,185 @@ export function renderGlobalSettings(controller) {
   defPanel.appendChild(settingRow("Default status for new entries", defaultStatusSelect));
   defPanel.appendChild(settingRow("When an entry has no thumbnail", thumbBehaviorSelect));
   body.appendChild(defPanel);
+
+  // --- Card display (cosmetic field toggles) ---
+  const cardFields = state.settings?.card_fields || {};
+  const cardSwitches = {};
+  const cardPanel = panel(
+    "Card display",
+    "pi pi-id-card",
+    "Choose which fields appear on cards in the main grid. This only hides them — nothing is deleted."
+  );
+  for (const [key, label] of CARD_FIELD_DEFS) {
+    const sw = switchEl(cardFields[key] !== false);
+    cardSwitches[key] = sw;
+    cardPanel.appendChild(settingRow(label, sw));
+  }
+  body.appendChild(cardPanel);
+
+  // --- Appearance (accent color) ---
+  let selectedAccent = state.settings?.accent_color || DEFAULT_ACCENT;
+  const colorInput = el("input", { type: "color", className: "wv-color-input", value: selectedAccent, title: "Custom color" });
+  const swatchRow = el("div", { className: "wv-accent-swatches" });
+
+  function syncAccent() {
+    applyAccentColor(selectedAccent); // live preview; persisted on Save
+    colorInput.value = selectedAccent;
+    for (const sw of swatchRow.children) {
+      sw.classList.toggle("wv-swatch-active", (sw.dataset.color || "").toLowerCase() === selectedAccent.toLowerCase());
+    }
+  }
+
+  for (const c of PRESET_ACCENTS) {
+    swatchRow.appendChild(
+      el("button", {
+        className: "wv-swatch",
+        dataset: { color: c },
+        style: { background: c },
+        title: c,
+        "aria-label": `Accent color ${c}`,
+        onclick: () => {
+          selectedAccent = c;
+          syncAccent();
+        },
+      })
+    );
+  }
+  colorInput.addEventListener("input", () => {
+    selectedAccent = colorInput.value;
+    syncAccent();
+  });
+
+  const accentPanel = panel("Appearance", "pi pi-palette", "Accent color used for icons, the logo, and highlights throughout the vault.");
+  accentPanel.appendChild(
+    settingRow("Accent color", el("div", { className: "wv-accent-controls" }, [swatchRow, colorInput]))
+  );
+  body.appendChild(accentPanel);
+  syncAccent();
+
+  // --- Storage (example image compression) ---
+  const pillowOk = state.pillow_available !== false;
+  let compressFormat = state.settings?.example_compress_format === "jpeg" ? "jpeg" : "webp";
+  const compressSwitch = switchEl(!!state.settings?.compress_examples_on_upload && pillowOk);
+  compressSwitch.input.disabled = !pillowOk;
+
+  // Thumbnail source compression (always WebP — keeps the embedded workflow).
+  const sourceSwitch = switchEl(state.settings?.compress_thumbnail_source !== false && pillowOk);
+  sourceSwitch.input.disabled = !pillowOk;
+
+  const formatRow = el("div", { className: "wv-vs-format" });
+  const FORMATS = [
+    ["webp", "WebP", "Smaller, keeps transparency, and the workflow stays drag-droppable into ComfyUI."],
+    ["jpeg", "JPEG", "Maximum compatibility, no transparency, and ComfyUI can't reload the workflow from a JPEG."],
+  ];
+  for (const [value, label, desc] of FORMATS) {
+    const radio = el("input", {
+      type: "radio",
+      name: "wv-compress-format",
+      className: "wv-radio-input",
+      value,
+      checked: compressFormat === value,
+      onchange: () => {
+        if (radio.checked) compressFormat = value;
+      },
+    });
+    formatRow.appendChild(
+      el("label", { className: "wv-radio-field" }, [
+        radio,
+        el("div", { className: "wv-radio-text" }, [
+          el("div", { className: "wv-radio-label" }, [label]),
+          el("div", { className: "wv-radio-desc" }, [desc]),
+        ]),
+      ])
+    );
+  }
+
+  function syncCompressUi() {
+    formatRow.style.display = compressSwitch.input.checked ? "" : "none";
+  }
+  compressSwitch.input.addEventListener("change", syncCompressUi);
+
+  const storagePanel = panel(
+    "Storage",
+    "pi pi-database",
+    "Large PNG example media is converted to smaller files as you add it — typically 5–15× smaller — so your vault stays portable and quick to back up. The embedded ComfyUI workflow is preserved (WebP), so nothing is lost. Recommended."
+  );
+  storagePanel.appendChild(settingRow("Compress example images on upload", compressSwitch));
+  storagePanel.appendChild(formatRow);
+  storagePanel.appendChild(settingRow("Compress thumbnail source on upload", sourceSwitch));
+  storagePanel.appendChild(
+    el("p", { className: "wv-radio-desc wv-vs-hint" }, [
+      "The full-resolution original is saved as a smaller WebP that keeps transparency and the same resolution, with the ComfyUI workflow still embedded — so it stays drag-droppable into ComfyUI.",
+    ])
+  );
+
+  const batchStatus = el("span", { className: "wv-vs-footer-status" });
+  const batchBtn = el(
+    "button",
+    {
+      className: "wv-btn",
+      disabled: !pillowOk,
+      onclick: async () => {
+        const ok = await confirmDialog({
+          title: "Compress existing images?",
+          message:
+            "Re-encodes every example image (to the selected format) and every thumbnail source (to WebP) already in your vault. Images that wouldn't get smaller are left untouched. This can take a moment.",
+          confirmText: "Compress",
+        });
+        if (!ok) return;
+        batchBtn.disabled = true;
+        batchStatus.textContent = "Compressing…";
+        try {
+          // Persist the chosen format first so the batch uses what's selected.
+          await VaultAPI.postSettings({ example_compress_format: compressFormat });
+          const res = await VaultAPI.compressExamples();
+          batchStatus.textContent = "";
+
+          const saved = Math.max(0, (res.bytes_before || 0) - (res.bytes_after || 0));
+          const pct = res.bytes_before ? Math.round((saved / res.bytes_before) * 100) : 0;
+          let message;
+          if (!res.examined) {
+            message = "No images were found to compress.";
+          } else if (!res.converted) {
+            message = `All ${res.examined} image${res.examined === 1 ? "" : "s"} are already optimized — nothing to compress.`;
+          } else {
+            const lines = [`Compressed ${res.converted} of ${res.examined} image${res.examined === 1 ? "" : "s"}.`];
+            if (res.skipped) lines.push(`${res.skipped} already optimized — left untouched.`);
+            lines.push("");
+            lines.push(`Before:  ${formatBytes(res.bytes_before)}`);
+            lines.push(`After:   ${formatBytes(res.bytes_after)}`);
+            lines.push(`Saved:   ${formatBytes(saved)}  (${pct}%)`);
+            message = lines.join("\n");
+          }
+          await confirmDialog({ title: "Compression complete", message, confirmText: "Done", cancelText: null });
+          await controller.refresh();
+        } catch (e) {
+          batchStatus.textContent = "";
+          showToast(e.message, "error");
+        } finally {
+          batchBtn.disabled = false;
+        }
+      },
+    },
+    [el("i", { className: "pi pi-bolt" }), "Compress existing images"]
+  );
+  storagePanel.appendChild(
+    el("div", { className: "wv-vs-batch-row" }, [
+      el("div", { className: "wv-vs-batch-text" }, [
+        el("div", {}, ["Compress existing images"]),
+        el("div", { className: "wv-radio-desc" }, ["Apply this to all example images and thumbnail sources already in your vault."]),
+      ]),
+      el("div", { className: "wv-vs-batch-action" }, [batchStatus, batchBtn]),
+    ])
+  );
+
+  if (!pillowOk) {
+    storagePanel.appendChild(
+      el("p", { className: "wv-muted wv-vs-hint" }, ["Compression is unavailable because Pillow isn't installed in this Python environment."])
+    );
+  }
+  body.appendChild(storagePanel);
+  syncCompressUi();
 
   // --- Tags ---
   const tags = state.tags || [];
@@ -143,6 +375,11 @@ export function renderGlobalSettings(controller) {
             show_archived: showArchivedSwitch.input.checked,
             default_status: defaultStatusSelect.value,
             default_thumbnail_behavior: thumbBehaviorSelect.value,
+            accent_color: selectedAccent,
+            card_fields: Object.fromEntries(CARD_FIELD_DEFS.map(([k]) => [k, cardSwitches[k].input.checked])),
+            compress_examples_on_upload: compressSwitch.input.checked,
+            example_compress_format: compressFormat,
+            compress_thumbnail_source: sourceSwitch.input.checked,
           });
           controller.filters.showArchived = showArchivedSwitch.input.checked;
           await controller.refresh();

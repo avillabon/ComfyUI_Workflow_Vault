@@ -3,7 +3,15 @@
 import os
 import shutil
 
-from . import media, storage, utils
+from . import config, media, storage, utils
+
+
+def _compress_opts(vault_root):
+    s = config.load_vault_settings(vault_root)
+    return {
+        "enabled": bool(s.get("compress_examples_on_upload", True)),
+        "format": s.get("example_compress_format", "webp"),
+    }
 
 
 def _next_example_dir(vault_root, slug):
@@ -19,9 +27,11 @@ def _next_example_dir(vault_root, slug):
     return f"example_{n:03d}"
 
 
-def _save_media_list(dest_dir, files, subdir_name):
+def _save_media_list(dest_dir, files, subdir_name, compress=None):
     """Returns (items, skipped_filenames). Files with an unsupported
-    extension are skipped rather than copied."""
+    extension are skipped rather than copied. Image files are compressed when
+    `compress` is enabled (the on-disk file/extension may change, but the
+    displayed label and original_filename keep the user's original name)."""
     items = []
     skipped = []
     for f in files or []:
@@ -30,14 +40,26 @@ def _save_media_list(dest_dir, files, subdir_name):
         if not mtype:
             skipped.append(f.get("filename") or "(unnamed file)")
             continue
-        final_name = media.copy_media_bytes(dest_dir, f["bytes"], f["filename"])
-        items.append({
+        data = f["bytes"]
+        filename = f["filename"]
+        # Mark images touched by the compressor (win or no-win) so a later batch
+        # run never re-encodes them and causes generation loss.
+        compressed = bool(compress and compress.get("enabled") and mtype == "image")
+        if compressed:
+            result = media.compress_example_image(data, filename, compress.get("format", "webp"))
+            if result:
+                data, filename = result
+        final_name = media.copy_media_bytes(dest_dir, data, filename, mtime=f.get("mtime"))
+        item = {
             "id": utils.generate_id("media"),
             "type": mtype,
             "label": (f.get("label") or "").strip() or os.path.splitext(f["filename"])[0],
             "file": f"{subdir_name}/{final_name}",
             "original_filename": f["filename"],
-        })
+        }
+        if compressed:
+            item["compressed"] = True
+        items.append(item)
     return items, skipped
 
 
@@ -50,8 +72,9 @@ def create_example(vault_root, manifest, slug, data, input_files=None, output_fi
     os.makedirs(inputs_dir, exist_ok=True)
     os.makedirs(outputs_dir, exist_ok=True)
 
-    inputs, skipped_in = _save_media_list(inputs_dir, input_files, "inputs")
-    outputs, skipped_out = _save_media_list(outputs_dir, output_files, "outputs")
+    compress = _compress_opts(vault_root)
+    inputs, skipped_in = _save_media_list(inputs_dir, input_files, "inputs", compress)
+    outputs, skipped_out = _save_media_list(outputs_dir, output_files, "outputs", compress)
 
     example = {
         "id": utils.generate_id("example"),
@@ -152,12 +175,13 @@ def update_example(vault_root, manifest, slug, example_id, data,
         _apply_media_layout(edir, example, data.get("inputs", cur_inputs), data.get("outputs", cur_outputs))
 
     skipped = []
+    compress = _compress_opts(vault_root)
     if new_input_files:
-        new_items, skipped_in = _save_media_list(os.path.join(edir, "inputs"), new_input_files, "inputs")
+        new_items, skipped_in = _save_media_list(os.path.join(edir, "inputs"), new_input_files, "inputs", compress)
         example["inputs"] = example.get("inputs", []) + new_items
         skipped += skipped_in
     if new_output_files:
-        new_items, skipped_out = _save_media_list(os.path.join(edir, "outputs"), new_output_files, "outputs")
+        new_items, skipped_out = _save_media_list(os.path.join(edir, "outputs"), new_output_files, "outputs", compress)
         example["outputs"] = example.get("outputs", []) + new_items
         skipped += skipped_out
 
@@ -198,3 +222,75 @@ def delete_example(vault_root, manifest, slug, example_id):
     shutil.rmtree(edir, ignore_errors=True)
     manifest["updated_at"] = utils.now_iso()
     return True, None
+
+
+def compress_all_examples(vault_root, fmt):
+    """Compress every existing example image across the whole vault, in place.
+
+    Idempotent: images that wouldn't shrink (or already-compressed ones) are
+    skipped, and per-file failures are ignored so one bad file can't abort the
+    run. Returns {examined, converted, skipped, bytes_before, bytes_after}."""
+    examined = 0
+    converted = 0
+    bytes_before = 0
+    bytes_after = 0
+    for slug in storage.list_entry_slugs(vault_root):
+        for example in storage.list_examples(vault_root, slug):
+            edir = storage.example_dir(vault_root, slug, example["dir"])
+            changed = False
+            for role in ("inputs", "outputs"):
+                for item in example.get(role, []):
+                    if item.get("type") != "image":
+                        continue
+                    examined += 1
+                    if item.get("compressed"):
+                        continue  # already compressed — never re-encode
+                    abs_path = os.path.join(edir, item["file"])
+                    if not os.path.isfile(abs_path):
+                        continue
+                    try:
+                        with open(abs_path, "rb") as fh:
+                            data = fh.read()
+                        src_mtime = os.path.getmtime(abs_path)
+                        src_ctime = os.path.getctime(abs_path)
+                    except OSError:
+                        continue
+                    result = media.compress_example_image(data, os.path.basename(item["file"]), fmt)
+                    if not result:
+                        continue
+                    new_bytes, new_name = result
+                    new_rel = f"{role}/{new_name}"
+                    new_abs = os.path.join(edir, new_rel)
+                    same_file = os.path.normpath(new_abs) == os.path.normpath(abs_path)
+                    if not same_file and os.path.exists(new_abs):
+                        new_name = media._unique_filename(os.path.join(edir, role), new_name)
+                        new_rel = f"{role}/{new_name}"
+                        new_abs = os.path.join(edir, new_rel)
+                        same_file = False
+                    try:
+                        utils.atomic_write_bytes(new_abs, new_bytes)
+                    except OSError:
+                        continue
+                    # Keep the source file's original date on the converted file.
+                    utils.set_file_times(new_abs, src_mtime, ctime=src_ctime)
+                    if not same_file:
+                        try:
+                            os.remove(abs_path)
+                        except OSError:
+                            pass
+                    item["file"] = new_rel
+                    item["compressed"] = True
+                    bytes_before += len(data)
+                    bytes_after += len(new_bytes)
+                    converted += 1
+                    changed = True
+            if changed:
+                saved = {k: v for k, v in example.items() if k != "dir"}
+                utils.atomic_write_json(os.path.join(edir, "example.json"), saved)
+    return {
+        "examined": examined,
+        "converted": converted,
+        "skipped": examined - converted,
+        "bytes_before": bytes_before,
+        "bytes_after": bytes_after,
+    }

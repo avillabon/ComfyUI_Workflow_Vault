@@ -1,2 +1,5 @@
-# ComfyUI Workflow Vault uses only the Python standard library plus
-# aiohttp, which ComfyUI already bundles. No extra dependencies needed.
+# ComfyUI Workflow Vault uses the Python standard library plus aiohttp and
+# Pillow — both already bundled by ComfyUI, so no extra installs are needed.
+# Pillow powers optional example-image compression; the vault still runs
+# without it (compression just disables).
+Pillow

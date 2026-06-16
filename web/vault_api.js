@@ -40,6 +40,8 @@ export const VaultAPI = {
   getState: () => getJSON("/workflow-vault/state"),
   getSettings: () => getJSON("/workflow-vault/settings"),
   postSettings: (body) => postJSON("/workflow-vault/settings", body),
+  browseFolder: () => postJSON("/workflow-vault/browse-folder", {}),
+  compressExamples: () => postJSON("/workflow-vault/compress-examples", {}),
   initialize: (vaultRoot) => postJSON("/workflow-vault/initialize", { vault_root: vaultRoot }),
 
   createEntry: (formData) => postForm("/workflow-vault/entries", formData),

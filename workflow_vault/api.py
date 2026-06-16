@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 import os
+import re
 import zipfile
 
 from aiohttp import web
@@ -87,6 +88,13 @@ async def _parse_multipart(request):
         raise
     except Exception:
         raise _MultipartError("Could not parse upload.")
+    # Carry each source file's original date (browser File.lastModified, in ms)
+    # onto its file dict as POSIX seconds, so converted files keep their date.
+    mtimes = data.get("file_mtimes") if isinstance(data.get("file_mtimes"), dict) else {}
+    for name, f in files.items():
+        ts = mtimes.get(name)
+        if isinstance(ts, (int, float)) and ts > 0:
+            f["mtime"] = ts / 1000.0
     return data, files
 
 
@@ -124,6 +132,7 @@ def _full_state(vault_root):
     state["vault_root"] = vault_root
     state["initialized"] = True
     state["settings"] = config.load_vault_settings(vault_root)
+    state["pillow_available"] = media.pillow_available()
     return state
 
 
@@ -219,6 +228,24 @@ async def post_settings(request):
         if body["sort"] not in config.VALID_SORTS:
             return _error("Invalid sort.")
         updates["sort"] = body["sort"]
+    if "accent_color" in body:
+        color = str(body.get("accent_color") or "").strip()
+        if not re.match(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", color):
+            return _error("Invalid accent color.")
+        updates["accent_color"] = color
+    if "card_fields" in body:
+        cf = body.get("card_fields")
+        if not isinstance(cf, dict):
+            return _error("Invalid card_fields.")
+        updates["card_fields"] = {k: bool(v) for k, v in cf.items() if k in config.CARD_FIELD_KEYS}
+    if "compress_examples_on_upload" in body:
+        updates["compress_examples_on_upload"] = bool(body["compress_examples_on_upload"])
+    if "example_compress_format" in body:
+        if body["example_compress_format"] not in config.VALID_COMPRESS_FORMATS:
+            return _error("Invalid example_compress_format.")
+        updates["example_compress_format"] = body["example_compress_format"]
+    if "compress_thumbnail_source" in body:
+        updates["compress_thumbnail_source"] = bool(body["compress_thumbnail_source"])
 
     if updates:
         config.save_vault_settings(vault_root, updates)
@@ -265,6 +292,8 @@ async def post_create_entry(request):
 
     if "thumbnail" in files:
         data["thumbnail"] = files["thumbnail"]
+    if "thumbnail_source" in files:
+        data["thumbnail_source"] = files["thumbnail_source"]
 
     for i, example in enumerate(data.get("examples") or []):
         example["input_files"] = _collect_indexed_files(files, f"example_{i}_input_", example.get("input_labels"))
@@ -290,7 +319,9 @@ async def post_entry_metadata(request):
         data, files = await _parse_multipart(request)
     except _MultipartError as e:
         return _error(str(e))
-    new_slug, err_msg = entries.update_entry_metadata(vault_root, manifest, slug, data, files.get("thumbnail"))
+    new_slug, err_msg = entries.update_entry_metadata(
+        vault_root, manifest, slug, data, files.get("thumbnail"), files.get("thumbnail_source")
+    )
     if err_msg:
         return _error(err_msg)
     return web.json_response(storage.build_entry_state(vault_root, new_slug))
@@ -386,6 +417,57 @@ async def post_open_entry_folder(request):
     if not ok:
         return _error(err_msg)
     return web.json_response({"ok": True})
+
+
+@routes.post("/workflow-vault/browse-folder")
+async def post_browse_folder(request):
+    """Open a native OS folder-picker dialog and return the chosen path.
+
+    Runs tkinter off the event loop so the server stays responsive while the
+    dialog is open. Returns {"path": "..."} or an error if the user cancels or
+    tkinter is unavailable."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError:
+        return _error("Native folder browser is unavailable (tkinter not installed).")
+
+    def _pick():
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes("-topmost", True)
+        path = filedialog.askdirectory(title="Choose vault folder")
+        root.destroy()
+        return path or None
+
+    chosen = await asyncio.to_thread(_pick)
+    if not chosen:
+        return web.json_response({"ok": True, "path": None})
+    return web.json_response({"ok": True, "path": chosen})
+
+
+@routes.post("/workflow-vault/compress-examples")
+async def post_compress_examples(request):
+    """Batch-compress every existing example image across the vault."""
+    vault_root, err = _require_vault()
+    if err:
+        return err
+    if not media.pillow_available():
+        return _error("Image compression is unavailable (Pillow not installed).")
+    settings = config.load_vault_settings(vault_root)
+    fmt = settings.get("example_compress_format", "webp")
+    if fmt not in config.VALID_COMPRESS_FORMATS:
+        fmt = "webp"
+    # CPU-bound — run off the event loop so the server stays responsive. The
+    # same sweep also re-encodes archival thumbnail sources (always WebP); the
+    # two stat sets are summed so the completion summary covers everything.
+    def _compress_all():
+        a = examples.compress_all_examples(vault_root, fmt)
+        b = entries.compress_all_thumbnail_sources(vault_root)
+        return {k: a[k] + b[k] for k in a}
+
+    stats = await asyncio.to_thread(_compress_all)
+    return web.json_response({"ok": True, **stats})
 
 
 # ---------------------------------------------------------------------------

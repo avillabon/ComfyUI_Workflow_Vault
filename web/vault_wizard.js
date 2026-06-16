@@ -1,12 +1,13 @@
 // "Save Current Workflow to Vault" flow: create a brand-new entry, or save
 // the current canvas as a new/overwritten version of an existing entry.
 
-import { el, clear, showToast, confirmDialog } from "./vault_dom.js";
+import { el, clear, showToast, confirmDialog, toggleField } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
 import { STATUS_LABELS, STATUS_ORDER, GENERATION_TYPES } from "./vault_modal.js";
 import { renderFolderSelect } from "./vault_folders.js";
 import { renderTagInput, tagCountsFrom } from "./vault_tag_input.js";
 import { renderThumbnailField } from "./vault_thumbnail_input.js";
+import { makeThumbnailFile } from "./vault_image.js";
 import { renderMediaPicker } from "./vault_media_picker.js";
 import { renderNotesEditor } from "./vault_notes_editor.js";
 import { getCurrentWorkflowJSON, getWorkflowVaultOrigin } from "./vault_workflow.js";
@@ -131,14 +132,14 @@ function renderCreateForm(controller) {
     { className: "wv-input" },
     [el("option", { value: "" }, ["— None —"]), ...GENERATION_TYPES.map((t) => el("option", { value: t.id }, [t.label]))]
   );
-  const favCheckbox = el("input", { type: "checkbox" });
+  const favSwitch = toggleField("Favorite", false, markDirty);
   const thumbField = renderThumbnailField({ currentUrl: null });
 
   // --- Right column inputs: version + notes ---
   const customLabelInput = el("input", { className: "wv-input", type: "text", placeholder: "e.g. Initial version" });
   const versionNotesInput = el("textarea", { className: "wv-input wv-textarea", placeholder: "Notes for this version (Markdown supported)" });
 
-  for (const input of [nameInput, descInput, statusSelect, genTypeSelect, folderSelect, favCheckbox, thumbField.fileInput, customLabelInput, versionNotesInput]) {
+  for (const input of [nameInput, descInput, statusSelect, genTypeSelect, folderSelect, thumbField.fileInput, customLabelInput, versionNotesInput]) {
     input.addEventListener("input", markDirty);
     input.addEventListener("change", markDirty);
   }
@@ -152,7 +153,7 @@ function renderCreateForm(controller) {
   left.appendChild(formRow("Tags", tagInput));
   left.appendChild(el("div", { className: "wv-form-row-pair" }, [formRow("Status", statusSelect), formRow("Generation type", genTypeSelect)]));
   left.appendChild(formRow("Folder", folderSelect));
-  left.appendChild(el("div", { className: "wv-form-row" }, [el("label", { className: "wv-checkbox-label" }, [favCheckbox, "Favorite"])]));
+  left.appendChild(el("div", { className: "wv-form-row" }, [favSwitch]));
   left.appendChild(formRow("Thumbnail (optional)", thumbField));
 
   // --- Right column: tabbed panel ---
@@ -275,7 +276,7 @@ function renderCreateForm(controller) {
         tags: tagInput.getTags(),
         status: statusSelect.value,
         generation_type: genTypeSelect.value || null,
-        favorite: favCheckbox.checked,
+        favorite: favSwitch.input.checked,
         folder_id: folderSelect.value === "__new__" ? null : folderSelect.value || null,
         custom_label: customLabelInput.value.trim() || null,
         version_notes: versionNotesInput.value,
@@ -284,18 +285,36 @@ function renderCreateForm(controller) {
       };
 
       const formData = new FormData();
-      if (thumbField.fileInput.files[0]) formData.append("thumbnail", thumbField.fileInput.files[0]);
+      // Original source date per uploaded part, so converted files keep it.
+      const mtimes = {};
+      const pickedThumb = thumbField.fileInput.files[0];
+      if (pickedThumb) {
+        // Small display thumbnail + untouched original (archival).
+        formData.append("thumbnail", await makeThumbnailFile(pickedThumb));
+        formData.append("thumbnail_source", pickedThumb);
+        mtimes.thumbnail = pickedThumb.lastModified;
+        mtimes.thumbnail_source = pickedThumb.lastModified;
+      }
 
       const examplesData = [];
       let exampleIdx = 0;
       for (const blk of exampleBlocks) {
         if (blk.picker.isEmpty()) continue;
         examplesData.push({ notes: blk.notesInput.value });
-        blk.picker.getByRole("input").forEach((f, i) => formData.append(`example_${exampleIdx}_input_${i}`, f));
-        blk.picker.getByRole("output").forEach((f, i) => formData.append(`example_${exampleIdx}_output_${i}`, f));
+        blk.picker.getByRole("input").forEach((f, i) => {
+          const name = `example_${exampleIdx}_input_${i}`;
+          formData.append(name, f);
+          mtimes[name] = f.lastModified;
+        });
+        blk.picker.getByRole("output").forEach((f, i) => {
+          const name = `example_${exampleIdx}_output_${i}`;
+          formData.append(name, f);
+          mtimes[name] = f.lastModified;
+        });
         exampleIdx++;
       }
       data.examples = examplesData;
+      data.file_mtimes = mtimes;
       formData.append("data", JSON.stringify(data));
 
       const entry = await VaultAPI.createEntry(formData);

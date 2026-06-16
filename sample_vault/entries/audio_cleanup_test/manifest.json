@@ -10,6 +10,7 @@
     "denoise",
     "sample"
   ],
+  "generation_type": "audio",
   "status": "draft",
   "favorite": false,
   "thumbnail": "thumbnails/cover.jpg",

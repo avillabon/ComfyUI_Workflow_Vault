@@ -15,6 +15,27 @@ export function getCurrentWorkflowJSON() {
   return data;
 }
 
+// The display name of the currently-active ComfyUI workflow tab, cleaned up
+// for use as a default entry name. Returns "" for an unsaved/untitled tab so
+// callers can fall back to an empty field rather than a meaningless default.
+export function getCurrentWorkflowName() {
+  try {
+    const active = app.extensionManager?.workflow?.activeWorkflow;
+    if (!active) return "";
+    // `filename` is what ComfyUI shows on the tab; key/path are fallbacks for
+    // older/newer frontends. Any of them may carry a folder prefix and a
+    // trailing ".json".
+    let raw = String(active.filename || active.key || active.path || "");
+    raw = raw.split(/[\\/]/).pop();        // drop any directory portion
+    raw = raw.replace(/\.json$/i, "");      // drop the .json extension
+    raw = raw.replace(/^\*+/, "").trim();   // drop a leading "modified" marker
+    if (!raw || /^unsaved workflow$/i.test(raw)) return "";
+    return raw;
+  } catch {
+    return "";
+  }
+}
+
 // The origin marker (entry/version this canvas was opened from), read straight
 // off the live graph so the Save wizard can default to updating that entry.
 export function getWorkflowVaultOrigin() {

@@ -10,7 +10,7 @@ import { renderThumbnailField } from "./vault_thumbnail_input.js";
 import { makeThumbnailFile } from "./vault_image.js";
 import { renderMediaPicker } from "./vault_media_picker.js";
 import { renderNotesEditor } from "./vault_notes_editor.js";
-import { getCurrentWorkflowJSON, getWorkflowVaultOrigin } from "./vault_workflow.js";
+import { getCurrentWorkflowJSON, getWorkflowVaultOrigin, getCurrentWorkflowName } from "./vault_workflow.js";
 
 export function renderWizard(controller) {
   const wrap = el("div", { className: "wv-wizard" });
@@ -111,7 +111,9 @@ function renderCreateForm(controller) {
   const markDirty = () => controller.setDirty(true);
 
   // --- Left column: entry metadata ---
-  const nameInput = el("input", { className: "wv-input", type: "text", placeholder: "Workflow name" });
+  // Default the name to the current ComfyUI tab's name (blank if the tab is
+  // unsaved/untitled). The user can overwrite it before saving.
+  const nameInput = el("input", { className: "wv-input", type: "text", placeholder: "Workflow name", value: getCurrentWorkflowName() });
   const descInput = el("textarea", { className: "wv-input wv-textarea", placeholder: "What does this workflow do?" });
   const tagInput = renderTagInput({
     tags: [],

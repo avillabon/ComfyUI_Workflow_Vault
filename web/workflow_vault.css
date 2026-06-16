@@ -1496,24 +1496,29 @@
   background: var(--wv-card-bg);
 }
 
-.wv-tag-suggestion {
+.wv-tag-suggestion-grid {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 10px 10px;
+}
+
+.wv-tag-suggestion-pill {
+  background: var(--wv-bg-alt);
+  border: 1px solid var(--wv-border);
+  border-radius: 999px;
+  color: var(--wv-fg);
+  padding: 3px 11px;
   font-size: 12px;
   cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
 }
 
-.wv-tag-suggestion:hover,
-.wv-tag-suggestion-active {
+.wv-tag-suggestion-pill:hover,
+.wv-tag-suggestion-pill.wv-tag-suggestion-active {
+  border-color: var(--wv-accent);
   background: var(--wv-hover-bg);
-}
-
-.wv-tag-suggestion-count {
-  font-size: 11px;
-  color: var(--wv-faint);
+  color: var(--wv-accent);
 }
 
 /* ---------------------------------------------------------------------- */

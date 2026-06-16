@@ -133,6 +133,7 @@ def _full_state(vault_root):
     state["initialized"] = True
     state["settings"] = config.load_vault_settings(vault_root)
     state["pillow_available"] = media.pillow_available()
+    state["trash_label"] = utils.trash_label()
     return state
 
 
@@ -346,6 +347,24 @@ async def post_archive_entry(request):
     archived = bool(body.get("archived", True))
     entries.set_archived(vault_root, manifest, slug, archived, body.get("restore_status"))
     return web.json_response(storage.build_entry_state(vault_root, slug))
+
+
+@routes.post("/workflow-vault/entries/{entry_id}/delete")
+async def post_delete_entry(request):
+    """Delete a whole entry from the vault, sending its folder to the Recycle
+    Bin where supported. CPU/IO work runs off the event loop."""
+    vault_root, err = _require_vault()
+    if err:
+        return err
+    entry_id = request.match_info["entry_id"]
+    slug, _manifest, err = _require_entry(vault_root, entry_id)
+    if err:
+        return err
+
+    method, err_msg = await asyncio.to_thread(entries.delete_entry, vault_root, slug)
+    if err_msg:
+        return _error(err_msg)
+    return web.json_response({"ok": True, "method": method})
 
 
 def _build_entry_zip(edir, arc_root):

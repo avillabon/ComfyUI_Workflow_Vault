@@ -34,7 +34,7 @@ export function renderTagInput({ tags = [], allTags = [], tagCounts = null } = {
     for (const tag of current) {
       pills.appendChild(
         el("span", { className: "wv-tag-pill" }, [
-          tag,
+          `#${tag}`,
           el(
             "button",
             { type: "button", className: "wv-tag-pill-remove", title: "Remove tag", onclick: () => removeTag(tag) },
@@ -46,7 +46,8 @@ export function renderTagInput({ tags = [], allTags = [], tagCounts = null } = {
   }
 
   function addTag(raw) {
-    const tag = (raw || "").trim().toLowerCase();
+    // Normalize: lowercase, drop a leading '#', collapse inner whitespace.
+    const tag = (raw || "").trim().toLowerCase().replace(/^#+/, "").trim();
     if (!tag || current.includes(tag)) return;
     current.push(tag);
     renderPills();
@@ -77,9 +78,9 @@ export function renderTagInput({ tags = [], allTags = [], tagCounts = null } = {
     if (tagCounts) {
       return [...pool]
         .sort((a, b) => (tagCounts[b] || 0) - (tagCounts[a] || 0) || a.localeCompare(b))
-        .slice(0, 10);
+        .slice(0, 24);
     }
-    return pool.slice(0, 10);
+    return pool.slice(0, 24);
   }
 
   function renderSuggestions() {
@@ -88,18 +89,17 @@ export function renderTagInput({ tags = [], allTags = [], tagCounts = null } = {
       hideSuggestions();
       return;
     }
-    if (popularMode) {
-      suggestions.appendChild(el("div", { className: "wv-tag-suggestions-label" }, ["Popular tags — click to add"]));
-    }
+    suggestions.appendChild(
+      el("div", { className: "wv-tag-suggestions-label" }, [popularMode ? "Popular tags" : "Matching tags"])
+    );
+    const grid = el("div", { className: "wv-tag-suggestion-grid" });
     matches.forEach((m, i) => {
-      const count = tagCounts ? tagCounts[m] : null;
-      const children = [el("span", {}, [m])];
-      if (count != null) children.push(el("span", { className: "wv-tag-suggestion-count" }, [String(count)]));
-      suggestions.appendChild(
+      grid.appendChild(
         el(
-          "div",
+          "button",
           {
-            className: `wv-tag-suggestion${i === activeIndex ? " wv-tag-suggestion-active" : ""}`,
+            type: "button",
+            className: `wv-tag-suggestion-pill${i === activeIndex ? " wv-tag-suggestion-active" : ""}`,
             role: "option",
             "aria-selected": i === activeIndex ? "true" : "false",
             // mousedown (not click) fires before the input's blur, and
@@ -109,10 +109,11 @@ export function renderTagInput({ tags = [], allTags = [], tagCounts = null } = {
               selectMatch(m);
             },
           },
-          children
+          [`#${m}`]
         )
       );
     });
+    suggestions.appendChild(grid);
     suggestions.style.display = "";
     input.setAttribute("aria-expanded", "true");
   }
@@ -138,7 +139,7 @@ export function renderTagInput({ tags = [], allTags = [], tagCounts = null } = {
     popularMode = false;
     matches = allTags
       .filter((t) => t.toLowerCase().includes(query) && !current.includes(t.toLowerCase()))
-      .slice(0, 8);
+      .slice(0, 16);
     activeIndex = -1;
     renderSuggestions();
   }
@@ -163,6 +164,17 @@ export function renderTagInput({ tags = [], allTags = [], tagCounts = null } = {
         addTag(input.value);
         input.value = "";
         updateSuggestions();
+      }
+    } else if (e.key === " ") {
+      // Space commits the typed-out tag (the user's own word), rather than a
+      // highlighted suggestion — so you can type "video colorize " quickly.
+      if (input.value.trim()) {
+        e.preventDefault();
+        addTag(input.value);
+        input.value = "";
+        updateSuggestions();
+      } else {
+        e.preventDefault(); // swallow stray leading spaces
       }
     } else if (e.key === "Backspace" && !input.value && current.length) {
       removeTag(current[current.length - 1]);

@@ -97,6 +97,151 @@ def _set_windows_creation_time(path, ctime):
         pass
 
 
+def trash_label():
+    """The user-facing name of the OS trash, for UI copy."""
+    if sys.platform.startswith("win"):
+        return "Recycle Bin"
+    return "Trash"
+
+
+def send_to_trash(path):
+    """Delete a file/folder, preferring the OS trash so the delete is
+    recoverable. Returns "trash" if it reached the trash, or "permanent" if no
+    trash mechanism was available on this platform and it was removed for good
+    instead. Raises OSError if the path can't be removed at all.
+
+    Trash support is best-effort and dependency-free, per platform:
+      - Windows: SHFileOperationW          -> Recycle Bin
+      - macOS:   Finder via osascript      -> Trash
+      - Linux:   `gio trash` / `trash-put` -> XDG Trash
+    The cross-platform `send2trash` package, if it happens to be installed, is
+    tried first since it handles every platform correctly."""
+    path = os.path.normpath(path)
+    if not os.path.exists(path):
+        raise OSError("Path not found.")
+
+    if _move_to_trash(path):
+        return "trash"
+
+    # Fallback: permanent removal (no trash available on this platform/setup).
+    import shutil
+
+    if os.path.isdir(path):
+        shutil.rmtree(path)
+    else:
+        os.remove(path)
+    return "permanent"
+
+
+def _move_to_trash(path):
+    """Best-effort move to the OS trash. Returns True on success, False if no
+    trash mechanism worked (caller then falls back to a permanent delete)."""
+    # 1. send2trash when available — correct on every platform it supports.
+    try:
+        from send2trash import send2trash as _s2t
+
+        _s2t(path)
+        return not os.path.exists(path)
+    except ImportError:
+        pass
+    except Exception:
+        # Installed but failed (e.g. unsupported filesystem); try OS natives.
+        pass
+
+    # 2. Platform-native, no extra dependencies.
+    if sys.platform.startswith("win"):
+        return _windows_recycle(path)
+    if sys.platform == "darwin":
+        return _macos_trash(path)
+    return _linux_trash(path)
+
+
+def _macos_trash(path):
+    """Move a path to the macOS Trash by asking Finder via osascript. The path
+    is passed as an argument (not interpolated) to avoid quoting/injection."""
+    script = (
+        "on run argv\n"
+        "tell application \"Finder\" to delete (POSIX file (item 1 of argv) as alias)\n"
+        "end run"
+    )
+    try:
+        res = subprocess.run(
+            ["osascript", "-e", script, os.path.abspath(path)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30,
+        )
+        return res.returncode == 0 and not os.path.exists(path)
+    except Exception:
+        return False
+
+
+def _linux_trash(path):
+    """Move a path to the XDG Trash using whichever helper is installed. `gio`
+    (glib) is near-universal on desktop Linux and implements the freedesktop
+    Trash spec correctly, including cross-filesystem handling."""
+    import shutil as _shutil
+
+    candidates = (
+        ["gio", "trash", "--", path],
+        ["trash-put", "--", path],
+        ["trash", "--", path],
+    )
+    for argv in candidates:
+        if not _shutil.which(argv[0]):
+            continue
+        try:
+            res = subprocess.run(
+                argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30
+            )
+            if res.returncode == 0 and not os.path.exists(path):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _windows_recycle(path):
+    """Send a path to the Windows Recycle Bin via SHFileOperationW. Returns
+    True on success, False if the shell call failed (caller then falls back to
+    a permanent delete)."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        FO_DELETE = 3
+        FOF_SILENT = 0x0004
+        FOF_NOCONFIRMATION = 0x0010
+        FOF_ALLOWUNDO = 0x0040  # this is what routes it to the Recycle Bin
+        FOF_NOERRORUI = 0x0400
+
+        class SHFILEOPSTRUCTW(ctypes.Structure):
+            _fields_ = [
+                ("hwnd", wintypes.HWND),
+                ("wFunc", wintypes.UINT),
+                ("pFrom", wintypes.LPCWSTR),
+                ("pTo", wintypes.LPCWSTR),
+                ("fFlags", ctypes.c_uint16),
+                ("fAnyOperationsAborted", wintypes.BOOL),
+                ("hNameMappings", ctypes.c_void_p),
+                ("lpszProgressTitle", wintypes.LPCWSTR),
+            ]
+
+        op = SHFILEOPSTRUCTW()
+        op.hwnd = None
+        op.wFunc = FO_DELETE
+        # pFrom must be a double-null-terminated list of paths.
+        op.pFrom = os.path.abspath(path) + "\0\0"
+        op.pTo = None
+        op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI
+
+        shell32 = ctypes.windll.shell32
+        shell32.SHFileOperationW.argtypes = [ctypes.c_void_p]
+        shell32.SHFileOperationW.restype = ctypes.c_int
+        res = shell32.SHFileOperationW(ctypes.byref(op))
+        return res == 0 and not op.fAnyOperationsAborted
+    except Exception:
+        return False
+
+
 def now_iso():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 

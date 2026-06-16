@@ -262,6 +262,22 @@ def set_archived(vault_root, manifest, slug, archived, restore_status=None):
     storage.write_manifest(vault_root, slug, manifest)
 
 
+def delete_entry(vault_root, slug):
+    """Permanently remove an entry's whole folder, preferring the OS trash
+    (Recycle Bin) so it stays recoverable. Returns (method, error) where method
+    is "trash" or "permanent"."""
+    edir = storage.entry_dir(vault_root, slug)
+    # Defensive: never delete anything outside the vault's entries directory.
+    entries_root = config.entries_dir(vault_root)
+    if not os.path.isdir(edir) or not utils.is_path_inside(entries_root, edir):
+        return None, "Entry not found."
+    try:
+        method = utils.send_to_trash(edir)
+    except OSError as e:
+        return None, f"Could not delete entry: {e}"
+    return method, None
+
+
 def compress_all_thumbnail_sources(vault_root):
     """Re-encode every existing full-resolution thumbnail source across the
     vault to WebP, in place. Always WebP (metadata-preserving).

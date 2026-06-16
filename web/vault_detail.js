@@ -386,8 +386,41 @@ function renderEntryMetadataForm(controller, entry) {
           },
           [el("i", { className: "pi pi-inbox" }), "Archive Entry"]
         );
+
+  const deleteBtn = el(
+    "button",
+    {
+      className: "wv-btn wv-btn-danger",
+      onclick: async () => {
+        const trash = controller.state?.trash_label || "Trash";
+        const ok = await confirmDialog({
+          title: "Delete this entry?",
+          message: `"${entry.name}" and all its versions, examples, notes, and media will be removed from your vault and moved to the ${trash}. This can't be undone from inside the vault — you'd restore it from the ${trash}.`,
+          confirmText: "Delete",
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          const res = await VaultAPI.deleteEntry(entry.id);
+          controller.setDirty(false);
+          controller.selectedEntryId = null;
+          controller.view = "grid";
+          await controller.refresh();
+          showToast(
+            res.method === "permanent" ? "Entry permanently deleted." : `Entry moved to the ${trash}.`,
+            "success"
+          );
+        } catch (e) {
+          showToast(e.message, "error");
+        }
+      },
+    },
+    [el("i", { className: "pi pi-trash" }), "Delete Entry"]
+  );
+
   actions.appendChild(el("div", { className: "wv-topbar-spacer" }));
   actions.appendChild(archiveBtn);
+  actions.appendChild(deleteBtn);
 
   wrap.appendChild(actions);
   return wrap;

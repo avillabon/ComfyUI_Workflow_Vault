@@ -49,6 +49,8 @@ export const VaultAPI = {
     postForm(`/workflow-vault/entries/${encodeURIComponent(entryId)}/metadata`, formData),
   archiveEntry: (entryId, body) =>
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/archive`, body),
+  deleteEntry: (entryId) =>
+    postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/delete`, {}),
   openEntryFolder: (entryId) =>
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/open-folder`, {}),
   revealMedia: (entryId, relPath) =>

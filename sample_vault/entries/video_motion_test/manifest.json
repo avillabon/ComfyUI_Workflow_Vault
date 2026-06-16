@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "id": "entry_2B3C4D5E6F7081920314",
+  "slug": "video_motion_test",
+  "name": "Video Motion Loop",
+  "description": "Placeholder workflow representing a short looping motion clip generation pass.",
+  "tags": [
+    "video",
+    "motion",
+    "loop",
+    "sample"
+  ],
+  "status": "experimental",
+  "favorite": false,
+  "thumbnail": "thumbnails/cover.gif",
+  "folder_id": "folder_C3D4E5F60718293A4B5C",
+  "current_version_id": "version_CC33DD44EE55FF66AA11",
+  "created_at": "2026-05-25T14:00:00+00:00",
+  "updated_at": "2026-05-25T14:00:00+00:00"
+}

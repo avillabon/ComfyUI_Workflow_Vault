@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "id": "entry_3C4D5E6F70819203142A",
+  "slug": "audio_cleanup_test",
+  "name": "Audio Noise Cleanup",
+  "description": "Placeholder workflow for an audio denoise/cleanup pipeline.",
+  "tags": [
+    "audio",
+    "cleanup",
+    "denoise",
+    "sample"
+  ],
+  "status": "draft",
+  "favorite": false,
+  "thumbnail": "thumbnails/cover.jpg",
+  "folder_id": null,
+  "current_version_id": "version_DD44EE55FF66AA11BB22",
+  "created_at": "2026-05-28T08:15:00+00:00",
+  "updated_at": "2026-05-28T08:15:00+00:00"
+}

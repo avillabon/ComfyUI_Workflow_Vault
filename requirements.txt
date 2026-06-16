@@ -1,0 +1,2 @@
+# ComfyUI Workflow Vault uses only the Python standard library plus
+# aiohttp, which ComfyUI already bundles. No extra dependencies needed.

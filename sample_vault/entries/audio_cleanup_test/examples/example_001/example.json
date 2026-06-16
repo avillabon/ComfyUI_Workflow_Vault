@@ -1,0 +1,27 @@
+{
+  "id": "example_FF66AA11BB22CC33DD44",
+  "label": "example_001",
+  "title": "Noisy vs. cleaned clip",
+  "version_id": "version_DD44EE55FF66AA11BB22",
+  "primary_type": "audio",
+  "notes": "Short placeholder clips demonstrating the audio media layout in the Examples tab.",
+  "workflow_snapshot": "workflow.snapshot.json",
+  "inputs": [
+    {
+      "id": "media_21222324252627282930",
+      "type": "audio",
+      "label": "Noisy input",
+      "file": "inputs/input.wav",
+      "original_filename": "input.wav"
+    }
+  ],
+  "outputs": [
+    {
+      "id": "media_31323334353637383940",
+      "type": "audio",
+      "label": "Cleaned output",
+      "file": "outputs/output.wav",
+      "original_filename": "output.wav"
+    }
+  ]
+}

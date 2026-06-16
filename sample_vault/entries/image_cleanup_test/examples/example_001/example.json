@@ -1,0 +1,27 @@
+{
+  "id": "example_EE55FF66AA11BB22CC33",
+  "label": "example_001",
+  "title": "Before / after cleanup",
+  "version_id": "version_BB22CC33DD44EE55FF66",
+  "primary_type": "image",
+  "notes": "Left: a noisy scanned input. Right: the cleaned-up result from this workflow.",
+  "workflow_snapshot": "workflow.snapshot.json",
+  "inputs": [
+    {
+      "id": "media_01020304050607080910",
+      "type": "image",
+      "label": "Input scan",
+      "file": "inputs/input.png",
+      "original_filename": "input.png"
+    }
+  ],
+  "outputs": [
+    {
+      "id": "media_11121314151617181920",
+      "type": "image",
+      "label": "Cleaned output",
+      "file": "outputs/output.png",
+      "original_filename": "output.png"
+    }
+  ]
+}

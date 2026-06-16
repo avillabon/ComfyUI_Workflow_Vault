@@ -1,0 +1,29 @@
+{
+  "folders": [
+    {
+      "id": "folder_A1B2C3D4E5F60718293A",
+      "name": "Image",
+      "parent_id": null,
+      "description": "",
+      "entry_ids": []
+    },
+    {
+      "id": "folder_B2C3D4E5F60718293A4B",
+      "name": "Cleanup",
+      "parent_id": "folder_A1B2C3D4E5F60718293A",
+      "description": "",
+      "entry_ids": [
+        "entry_1A2B3C4D5E6F70819203"
+      ]
+    },
+    {
+      "id": "folder_C3D4E5F60718293A4B5C",
+      "name": "Video",
+      "parent_id": null,
+      "description": "",
+      "entry_ids": [
+        "entry_2B3C4D5E6F7081920314"
+      ]
+    }
+  ]
+}

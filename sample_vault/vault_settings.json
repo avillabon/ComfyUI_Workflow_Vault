@@ -1,0 +1,6 @@
+{
+  "schema_version": "1.0",
+  "show_archived": false,
+  "default_status": "draft",
+  "default_thumbnail_behavior": "placeholder"
+}

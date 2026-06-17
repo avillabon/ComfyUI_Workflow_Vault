@@ -14,6 +14,9 @@ __pycache__/
 package.ps1
 *.zip
 
+# --- Standalone app build (not part of the published node) ---
+standalone_app/
+
 # --- Editor / assistant workspace ---
 .claude/
 .vscode/

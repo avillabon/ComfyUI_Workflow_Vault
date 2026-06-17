@@ -128,11 +128,32 @@ export function renderFolderTree(container, controller) {
   const { state, filters } = controller;
   const folders = state.folders || [];
 
-  const header = el("div", { className: "wv-sidebar-heading-row" }, [
-    el("div", { className: "wv-sidebar-heading" }, ["Folders"]),
-    el("button", { className: "wv-icon-btn", title: "New folder", "aria-label": "New folder", onclick: () => createFolder(controller, null) }, ["+"]),
-  ]);
+  controller.ui = controller.ui || {};
+  if (controller.ui.foldersCollapsed === undefined) controller.ui.foldersCollapsed = true;
+  const collapsed = controller.ui.foldersCollapsed;
+
+  const toggle = () => {
+    controller.ui.foldersCollapsed = !controller.ui.foldersCollapsed;
+    controller.render();
+  };
+  const header = el(
+    "div",
+    {
+      className: "wv-sidebar-heading-row wv-sidebar-section-gap wv-folders-toggle",
+      role: "button",
+      tabindex: "0",
+      "aria-expanded": collapsed ? "false" : "true",
+      onclick: toggle,
+      onkeydown: onActivate(toggle),
+    },
+    [
+      el("i", { className: `pi pi-chevron-right wv-collapse-chevron${collapsed ? "" : " wv-collapse-chevron-open"}` }),
+      el("div", { className: "wv-sidebar-heading" }, ["Folders"]),
+    ]
+  );
   container.appendChild(header);
+
+  if (collapsed) return;
 
   const totalCount = (state.entries || []).length;
   const uncategorizedCount = (state.entries || []).filter((e) => !e.folder_id).length;
@@ -183,13 +204,6 @@ function renderFolderNode(node, controller, depth) {
   const count = countEntriesInFolder(state, node.id);
   const wrapper = el("div", {});
 
-  const actions = [
-    el("button", { className: "wv-icon-btn", title: "New subfolder", onclick: (e) => { e.stopPropagation(); createFolder(controller, node.id); } }, [el("i", { className: "pi pi-plus" })]),
-    el("button", { className: "wv-icon-btn", title: "Rename", onclick: (e) => { e.stopPropagation(); renameFolder(controller, node); } }, [el("i", { className: "pi pi-pencil" })]),
-    el("button", { className: "wv-icon-btn", title: "Move", onclick: (e) => { e.stopPropagation(); moveFolder(controller, node); } }, [el("i", { className: "pi pi-arrows-h" })]),
-    el("button", { className: "wv-icon-btn", title: "Delete", onclick: (e) => { e.stopPropagation(); deleteFolder(controller, node); } }, [el("i", { className: "pi pi-trash" })]),
-  ];
-
   wrapper.appendChild(
     makeRow({
       label: node.name,
@@ -197,7 +211,6 @@ function renderFolderNode(node, controller, depth) {
       active: filters.folderId === node.id,
       onClick: () => setFolder(controller, node.id),
       depth,
-      actions,
     })
   );
 
@@ -216,7 +229,7 @@ function setFolder(controller, folderId) {
 // Folder CRUD
 // ---------------------------------------------------------------------------
 
-async function createFolder(controller, parentId) {
+export async function createFolder(controller, parentId) {
   const name = await promptDialog({ title: "New Folder", message: "Folder name", placeholder: "Folder name" });
   if (name == null) return;
   if (!name.trim()) {
@@ -232,7 +245,7 @@ async function createFolder(controller, parentId) {
   }
 }
 
-async function renameFolder(controller, folder) {
+export async function renameFolder(controller, folder) {
   const name = await promptDialog({ title: "Rename Folder", message: "Folder name", defaultValue: folder.name });
   if (name == null) return;
   if (!name.trim()) {
@@ -248,7 +261,7 @@ async function renameFolder(controller, folder) {
   }
 }
 
-async function moveFolder(controller, folder) {
+export async function moveFolder(controller, folder) {
   const exclude = new Set([folder.id, ...getDescendantIds(controller.state.folders, folder.id)]);
   const options = folderSelectOptions(controller.state.folders, exclude);
   const result = await formDialog({
@@ -267,7 +280,7 @@ async function moveFolder(controller, folder) {
   }
 }
 
-async function deleteFolder(controller, folder) {
+export async function deleteFolder(controller, folder) {
   const ok = await confirmDialog({
     title: `Delete folder "${folder.name}"?`,
     message:

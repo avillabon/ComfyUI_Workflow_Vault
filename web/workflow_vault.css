@@ -3169,6 +3169,72 @@
   text-align: right;
 }
 
+/* Collapsible sidebar section (Folders) */
+.wv-folders-toggle {
+  justify-content: flex-start;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.wv-collapse-chevron {
+  font-size: 11px;
+  color: var(--wv-muted);
+  transition: transform 0.15s ease;
+}
+
+.wv-collapse-chevron-open {
+  transform: rotate(90deg);
+}
+
+/* Folder management (Vault Settings → Folders) */
+.wv-folder-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 480px;
+}
+
+.wv-folder-manager-actions {
+  margin-bottom: 8px;
+}
+
+.wv-folder-manager-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--wv-radius);
+}
+
+.wv-folder-manager-row:hover {
+  background: var(--wv-hover-bg);
+}
+
+.wv-folder-manager-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wv-folder-manager-name i {
+  color: var(--wv-muted);
+  font-size: 12px;
+}
+
+.wv-folder-manager-count {
+  font-size: 11px;
+  color: var(--wv-faint);
+  min-width: 20px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------------------------------------------------------------------- */
 /* Responsive: narrow modal / small viewports                              */
 /* ---------------------------------------------------------------------- */

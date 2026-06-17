@@ -4,6 +4,7 @@
 import { el, showToast, confirmDialog, promptDialog, applyAccentColor } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
 import { STATUS_LABELS, STATUS_ORDER } from "./vault_modal.js";
+import { buildFolderTree, countEntriesInFolder, createFolder, renameFolder, moveFolder, deleteFolder } from "./vault_folders.js";
 
 // Optional grid-card fields the user can hide for a more minimal look.
 const CARD_FIELD_DEFS = [
@@ -360,6 +361,43 @@ export function renderGlobalSettings(controller) {
     tagPanel.appendChild(listEl);
   }
   body.appendChild(tagPanel);
+
+  // --- Folders ---
+  const folders = state.folders || [];
+  const foldersPanel = panel(
+    "Folders",
+    "pi pi-folder",
+    "Create, rename, move, or delete folders. Deleting a folder moves its entries to Uncategorized — it never deletes entries."
+  );
+  foldersPanel.appendChild(
+    el("div", { className: "wv-folder-manager-actions" }, [
+      el("button", { className: "wv-btn", onclick: () => createFolder(controller, null) }, [el("i", { className: "pi pi-plus" }), " New folder"]),
+    ])
+  );
+  if (!folders.length) {
+    foldersPanel.appendChild(el("p", { className: "wv-muted" }, ["No folders yet."]));
+  } else {
+    const listEl = el("div", { className: "wv-folder-manager" });
+    const walk = (nodes, depth) => {
+      for (const node of nodes) {
+        const count = countEntriesInFolder(state, node.id);
+        listEl.appendChild(
+          el("div", { className: "wv-folder-manager-row", style: { paddingLeft: `${10 + depth * 16}px` } }, [
+            el("span", { className: "wv-folder-manager-name" }, [el("i", { className: "pi pi-folder" }), node.name]),
+            el("span", { className: "wv-folder-manager-count" }, [`${count}`]),
+            el("button", { className: "wv-icon-btn", title: "New subfolder", "aria-label": `New subfolder in ${node.name}`, onclick: () => createFolder(controller, node.id) }, [el("i", { className: "pi pi-plus" })]),
+            el("button", { className: "wv-icon-btn", title: "Rename", "aria-label": `Rename folder ${node.name}`, onclick: () => renameFolder(controller, node) }, [el("i", { className: "pi pi-pencil" })]),
+            el("button", { className: "wv-icon-btn", title: "Move", "aria-label": `Move folder ${node.name}`, onclick: () => moveFolder(controller, node) }, [el("i", { className: "pi pi-arrows-h" })]),
+            el("button", { className: "wv-icon-btn wv-icon-btn-danger", title: "Delete", "aria-label": `Delete folder ${node.name}`, onclick: () => deleteFolder(controller, node) }, [el("i", { className: "pi pi-trash" })]),
+          ])
+        );
+        walk(node.children, depth + 1);
+      }
+    };
+    walk(buildFolderTree(folders), 0);
+    foldersPanel.appendChild(listEl);
+  }
+  body.appendChild(foldersPanel);
 
   // --- Footer: save defaults ---
   const settingsStatus = el("span", { className: "wv-vs-footer-status" });

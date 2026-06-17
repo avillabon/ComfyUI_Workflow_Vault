@@ -305,8 +305,8 @@ export function renderGridBody(controller) {
   const body = el("div", { className: "wv-body" });
 
   const sidebar = el("div", { className: "wv-sidebar" });
-  renderFolderTree(sidebar, controller);
   renderGenerationTypeFilter(sidebar, controller);
+  renderFolderTree(sidebar, controller);
   sidebar.appendChild(renderSidebarFooter());
   body.appendChild(sidebar);
 
@@ -347,13 +347,14 @@ function renderGenerationTypeFilter(container, controller) {
   const entries = state.entries || [];
 
   container.appendChild(
-    el("div", { className: "wv-sidebar-heading-row wv-sidebar-section-gap" }, [
+    el("div", { className: "wv-sidebar-heading-row" }, [
       el("div", { className: "wv-sidebar-heading" }, ["Generation Type"]),
     ])
   );
 
   const list = el("div", { className: "wv-folder-tree" });
-  for (const t of GENERATION_TYPES) {
+  const sortedTypes = [...GENERATION_TYPES].sort((a, b) => a.label.localeCompare(b.label));
+  for (const t of sortedTypes) {
     const count = entries.filter((e) => (e.generation_types || []).includes(t.id)).length;
     const active = filters.generationType === t.id;
     const toggle = () => {

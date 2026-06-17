@@ -3,8 +3,8 @@
 
 import { el, clear, formatDate, showToast, confirmDialog, promptDialog, openImageLightbox, toggleField } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
-import { STATUS_LABELS, STATUS_ORDER, renderGenTypePicker } from "./vault_modal.js";
-import { renderFolderSelect, folderPath } from "./vault_folders.js";
+import { STATUS_LABELS, STATUS_ORDER, renderGenTypePicker, GENERATION_TYPE_MAP } from "./vault_modal.js";
+import { renderFolderSelect } from "./vault_folders.js";
 import { openWorkflowInGraph } from "./vault_workflow.js";
 import { renderVersionsTab } from "./vault_versions_tab.js";
 import { renderExamplesTab } from "./vault_examples_tab.js";
@@ -161,8 +161,14 @@ function renderOverviewSummary(controller, entry) {
   // Metadata tiles fill the panel with useful, scannable info.
   const versionCount = (entry.versions || []).length;
   const exampleCount = (entry.examples || []).length;
-  const path = folderPath(controller.state.folders || [], entry.folder_id);
-  const folderName = path.length ? path.map((f) => f.name).join(" / ") : "Uncategorized";
+  const genTypes = (entry.generation_types || []).map((id) => GENERATION_TYPE_MAP[id]).filter(Boolean);
+  const genTypeValue = genTypes.length
+    ? el(
+        "span",
+        { className: "wv-meta-tile-gentypes", title: genTypes.map((t) => t.label).join(", ") },
+        genTypes.map((t) => el("span", { className: "wv-meta-tile-gentype" }, [el("i", { className: t.icon }), t.label]))
+      )
+    : el("span", { className: "wv-muted" }, ["None"]);
 
   const updatedLabel = dateOnly(entry.updated_at);
 
@@ -176,7 +182,7 @@ function renderOverviewSummary(controller, entry) {
     el("div", { className: "wv-meta-tiles" }, [
       tile("Versions", String(versionCount)),
       tile("Examples", String(exampleCount)),
-      tile("Folder", el("span", { className: "wv-meta-tile-folder", title: folderName }, [el("i", { className: "pi pi-folder" }), folderName])),
+      tile("Generation type", genTypeValue),
       tile("Updated", updatedLabel),
     ])
   );

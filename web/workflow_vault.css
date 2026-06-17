@@ -1439,6 +1439,28 @@
   flex: none;
 }
 
+.wv-meta-tile-gentypes {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.wv-meta-tile-gentype {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.wv-meta-tile-gentype i {
+  font-size: 12px;
+  color: var(--wv-accent);
+  flex: none;
+}
+
 .wv-overview-tags-block {
   display: flex;
   flex-direction: column;

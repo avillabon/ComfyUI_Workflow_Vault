@@ -7,7 +7,7 @@ import { openCurrentVersion } from "./vault_detail.js";
 import { renderFolderTree, folderPath } from "./vault_folders.js";
 
 // Bump this on each edit to the current date (CalVer); shown in the footer.
-export const VAULT_VERSION = "2026.06.16";
+export const VAULT_VERSION = "2026.06.17";
 export const AUTHOR_NAME = "Alex Villabón";
 export const AUTHOR_URL = "https://www.youtube.com/@alexvillabon";
 export const REPO_URL = "https://github.com/avillabon/ComfyUI_Workflow_Vault";

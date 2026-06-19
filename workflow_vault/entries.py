@@ -416,6 +416,8 @@ def compress_all_thumbnail_sources(vault_root):
         rel = manifest.get("thumbnail_source")
         if not rel:
             continue
+        if media_mod.ext_of(rel) in media_mod.VIDEO_EXTS:
+            continue  # video sources are kept as-is; nothing to compress
         examined += 1
         if manifest.get("thumbnail_source_compressed"):
             continue  # already compressed — never re-encode (generation loss)

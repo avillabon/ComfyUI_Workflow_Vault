@@ -5,7 +5,7 @@ import io
 import json
 import os
 
-from . import storage, utils
+from . import storage, utils, video
 
 # Pillow ships with ComfyUI, but guard the import so the vault still works
 # (just without compression) in the rare environment where it's unavailable.
@@ -17,7 +17,7 @@ except Exception:  # pragma: no cover - defensive
     _PIL_AVAILABLE = False
 
 IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "gif"}
-VIDEO_EXTS = {"mp4", "mov", "webm"}
+VIDEO_EXTS = video.VIDEO_EXTS  # single source of truth lives in video.py
 AUDIO_EXTS = {"wav", "mp3", "m4a", "flac", "ogg"}
 ALL_MEDIA_EXTS = IMAGE_EXTS | VIDEO_EXTS | AUDIO_EXTS
 THUMBNAIL_EXTS = IMAGE_EXTS
@@ -151,9 +151,22 @@ def _clear_prefixed(tdir, prefix):
 
 
 def save_thumbnail(vault_root, slug, data, filename, mtime=None):
-    """Save the small display thumbnail as thumbnails/cover.<ext>."""
+    """Save the small display thumbnail as thumbnails/cover.<ext>.
+
+    A video source (MP4/MOV/WebM) is converted to an animated WebP first, so
+    the grid shows a looping preview. The untouched original is kept separately
+    via save_thumbnail_source."""
     ext = ext_of(filename)
-    if ext not in THUMBNAIL_EXTS:
+    if video.is_video_ext(ext):
+        webp_bytes = video.convert_to_animated_webp(data, ext)
+        if webp_bytes is None:
+            return None, (
+                "Could not convert the video to an animated thumbnail. "
+                "ffmpeg may be unavailable — try picking a single frame instead."
+            )
+        data = webp_bytes
+        ext = "webp"
+    elif ext not in THUMBNAIL_EXTS:
         return None, "Unsupported thumbnail type."
     tdir = storage.thumbnails_dir(vault_root, slug)
     _clear_prefixed(tdir, "cover.")
@@ -171,12 +184,16 @@ def save_thumbnail_source(vault_root, slug, data, filename, mtime=None, compress
     Always WebP — JPEG can't carry a ComfyUI-readable workflow, which is the
     whole reason this source copy exists.
 
+    A video source is archived as-is (no re-encode): it stays the untouched,
+    drag-droppable original behind a converted animated-WebP cover.
+
     Returns (rel_path, compressed, error)."""
     ext = ext_of(filename)
-    if ext not in THUMBNAIL_EXTS:
+    is_video = video.is_video_ext(ext)
+    if not is_video and ext not in THUMBNAIL_EXTS:
         return None, False, "Unsupported thumbnail source type."
     compressed = False
-    if compress:
+    if compress and not is_video:
         result = compress_example_image(data, filename, "webp")
         if result:
             data, filename = result

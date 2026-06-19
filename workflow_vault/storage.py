@@ -192,6 +192,58 @@ def build_entry_state(vault_root, slug):
     }
 
 
+def compute_footprint(vault_root):
+    """Walk the vault and tally on-disk bytes by media category, plus counts.
+
+    Sizes are real file sizes, bucketed by each entry's top-level subfolder
+    (thumbnails / examples / versions). Files outside those folders (manifests,
+    notes, and top-level vault metadata like folders.json/vault_settings.json)
+    aren't bucketed but still count toward 'total'. Returns a flat dict the
+    settings UI renders directly."""
+    totals = {"total": 0, "examples": 0, "thumbnails": 0, "workflows": 0}
+    counts = {"entries": 0, "versions": 0, "examples_count": 0, "tags": 0}
+    if not os.path.isdir(vault_root):
+        return {**totals, **counts}
+
+    for slug in list_entry_slugs(vault_root):
+        counts["entries"] += 1
+        entry_root = entry_dir(vault_root, slug)
+        for root, _dirs, files in os.walk(entry_root):
+            rel = os.path.relpath(root, entry_root).replace("\\", "/")
+            top = rel.split("/", 1)[0] if rel != "." else ""
+            bucket = {
+                "thumbnails": "thumbnails",
+                "examples": "examples",
+                "versions": "workflows",
+            }.get(top)
+            for name in files:
+                try:
+                    size = os.path.getsize(os.path.join(root, name))
+                except OSError:
+                    continue
+                totals["total"] += size
+                if bucket:
+                    totals[bucket] += size
+        counts["versions"] += len(list_versions(vault_root, slug))
+        counts["examples_count"] += len(list_examples(vault_root, slug))
+
+    # Top-level vault metadata sits outside any entry — counts toward total only.
+    try:
+        top_names = os.listdir(vault_root)
+    except OSError:
+        top_names = []
+    for name in top_names:
+        p = os.path.join(vault_root, name)
+        if os.path.isfile(p):
+            try:
+                totals["total"] += os.path.getsize(p)
+            except OSError:
+                continue
+
+    counts["tags"] = len(all_tags(vault_root))
+    return {**totals, **counts}
+
+
 def build_state(vault_root):
     entries = []
     for slug in list_entry_slugs(vault_root):

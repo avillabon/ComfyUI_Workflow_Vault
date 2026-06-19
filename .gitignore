@@ -17,6 +17,9 @@ package.ps1
 # --- Standalone app build (not part of the published node) ---
 standalone_app/
 
+# --- Local ComfyUI test install (portable, multi-GB; for live testing only) ---
+ComfyUI_windows_portable/
+
 # --- Editor / assistant workspace ---
 .claude/
 .vscode/

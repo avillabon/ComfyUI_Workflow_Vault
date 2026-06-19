@@ -2636,11 +2636,9 @@
 
 .wv-wizard-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  /* No bottom padding: the sticky footer pins to the content-box bottom, so a
-     bottom padding would leave a band below it where scrolled content (e.g. a
-     tall thumbnail) peeks through. The footer's own padding provides spacing. */
-  padding: 14px 16px 0;
+  padding: 14px 16px;
 }
 
 .wv-wizard-update-detail {
@@ -2740,15 +2738,20 @@
 .wv-required {
   color: var(--wv-danger);
 }
+.wv-field-error {
+  margin-top: 4px;
+  color: var(--wv-danger);
+  font-size: 12px;
+}
 
+/* Lives OUTSIDE the scrolling body as a flex sibling of .wv-wizard-body, so it
+   pins to the bottom without ever overlapping (and intercepting clicks on) the
+   form content above it — notably the thumbnail dropzone. */
 .wv-wizard-footer {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 16px -16px 0;
   padding: 12px 16px;
   background: var(--wv-bg);
   border-top: 1px solid var(--wv-border);
@@ -3248,5 +3251,172 @@
   .wv-wizard-grid,
   .wv-example-io {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Video thumbnail: the "animated vs pick-a-frame" fork and the frame scrubber,
+   both rendered inside the thumbnail dropzone. */
+.wv-thumb-choice-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--wv-fg);
+  text-align: center;
+  padding: 0 8px;
+}
+.wv-thumb-choice-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.wv-thumb-choice-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Frame picker: a centered modal (reuses .wv-dialog) holding the scrubbable
+   <video> and a seek slider. */
+.wv-framepick-dialog {
+  width: min(560px, 92vw);
+  max-width: 92vw;
+}
+.wv-framepick-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.wv-framepick-video {
+  width: 100%;
+  height: auto;
+  max-height: 60vh;
+  object-fit: contain;
+  display: block;
+  background: #000;
+  border-radius: var(--wv-radius);
+}
+.wv-framepick-slider {
+  width: 100%;
+  accent-color: var(--wv-accent);
+  cursor: pointer;
+}
+
+/* Settings: header Save button + two-column (masonry) panel grid. */
+.wv-vs-header-save {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* Tabbed settings: the body holds a full-width tab bar plus one visible section
+   at a time. Each section is a simple centered single column — no multi-column,
+   so nothing can overflow the modal at narrow widths. */
+.wv-settings-body-tabbed {
+  padding: 0;
+  gap: 0;
+}
+.wv-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px;
+  box-sizing: border-box;
+}
+/* Wide sections (Organize) flow their panels into two columns on roomy screens,
+   filling the horizontal space instead of leaving a tall single column. */
+.wv-settings-section-wide {
+  max-width: 1100px;
+}
+@media (min-width: 820px) {
+  .wv-settings-section-wide {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
+
+/* Settings: footprint breakdown (total, proportion bar, legend, counts). */
+.wv-vs-footprint {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.wv-fp-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.wv-fp-total-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--wv-faint);
+}
+.wv-fp-total-value {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--wv-fg);
+}
+.wv-fp-bar {
+  display: flex;
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--wv-card-bg);
+}
+.wv-fp-seg {
+  height: 100%;
+  min-width: 2px;
+}
+.wv-fp-examples,
+.wv-fp-seg.wv-fp-examples {
+  background: var(--wv-accent);
+}
+.wv-fp-thumbnails,
+.wv-fp-seg.wv-fp-thumbnails {
+  background: #22c55e;
+}
+.wv-fp-workflows,
+.wv-fp-seg.wv-fp-workflows {
+  background: #a855f7;
+}
+.wv-fp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* Each entry is a tight pill (dot · label · value) so the value reads right
+   beside its label instead of being pushed to the far edge of a wide cell. */
+.wv-fp-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  padding: 4px 10px;
+  background: var(--wv-card-bg);
+  border-radius: 999px;
+}
+.wv-fp-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+}
+.wv-fp-legend-label {
+  color: var(--wv-muted);
+}
+.wv-fp-legend-value {
+  color: var(--wv-fg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.wv-fp-counts {
+  grid-template-columns: repeat(4, 1fr);
+}
+@media (max-width: 600px) {
+  .wv-fp-counts {
+    grid-template-columns: repeat(3, 1fr);
   }
 }

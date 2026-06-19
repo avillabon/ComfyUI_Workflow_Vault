@@ -3,3 +3,10 @@
 # Pillow powers optional example-image compression; the vault still runs
 # without it (compression just disables).
 Pillow
+
+# imageio-ffmpeg ships a self-contained, cross-platform ffmpeg binary (no
+# system install). It powers MP4/MOV/WebM thumbnail -> animated-WebP previews.
+# Many ComfyUI users already have it (VideoHelperSuite depends on it). If the
+# binary is somehow unavailable, video thumbnails fall back to picking a single
+# frame in the browser; image thumbnails are unaffected.
+imageio-ffmpeg

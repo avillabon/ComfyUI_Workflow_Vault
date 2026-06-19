@@ -7,7 +7,6 @@ import { STATUS_LABELS, STATUS_ORDER, renderGenTypePicker } from "./vault_modal.
 import { renderFolderSelect } from "./vault_folders.js";
 import { renderTagInput, tagCountsFrom } from "./vault_tag_input.js";
 import { renderThumbnailField } from "./vault_thumbnail_input.js";
-import { makeThumbnailFile } from "./vault_image.js";
 import { renderMediaPicker } from "./vault_media_picker.js";
 import { renderNotesEditor } from "./vault_notes_editor.js";
 import { getCurrentWorkflowJSON, getWorkflowVaultOrigin, getCurrentWorkflowName } from "./vault_workflow.js";
@@ -53,9 +52,18 @@ export function renderWizard(controller) {
     updateBtn.classList.toggle("wv-segmented-btn-active", mode === "update");
     banner.style.display = mode === "create" ? "" : "none";
   };
+  let footerEl = null;
   const paintBody = () => {
     clear(body);
-    body.appendChild(mode === "update" ? renderUpdateForm(controller) : renderCreateForm(controller));
+    if (footerEl) { footerEl.remove(); footerEl = null; }
+    const form = mode === "update" ? renderUpdateForm(controller) : renderCreateForm(controller);
+    body.appendChild(form);
+    // The create form's footer mounts as a sibling of the scroll body so it
+    // pins to the bottom without overlapping (and blocking clicks on) content.
+    if (form.wizardFooter) {
+      footerEl = form.wizardFooter;
+      wrap.appendChild(footerEl);
+    }
   };
   async function switchMode(next) {
     if (mode === next) return;
@@ -79,12 +87,6 @@ function formRow(label, input) {
   return el("div", { className: "wv-form-row" }, [el("label", {}, [label]), input]);
 }
 
-function requiredRow(label, input) {
-  return el("div", { className: "wv-form-row" }, [
-    el("label", {}, [label, el("span", { className: "wv-required" }, [" *"])]),
-    input,
-  ]);
-}
 
 function countNodes(workflow) {
   return Array.isArray(workflow?.nodes) ? workflow.nodes.length : 0;
@@ -110,6 +112,21 @@ function renderCreateForm(controller) {
   const wrap = el("div", { className: "wv-wizard-create" });
   const markDirty = () => controller.setDirty(true);
 
+  // Required-field validation. Each error renders inline under its field (and we
+  // jump focus to the first problem) so the user can see exactly what's missing
+  // — rather than facing a silently disabled Save button.
+  const fieldErr = () => el("div", { className: "wv-field-error", style: { display: "none" }, role: "alert" });
+  const nameErr = fieldErr();
+  const tagErr = fieldErr();
+  const statusErr = fieldErr();
+  const genErr = fieldErr();
+  const reqRow = (label, input, errEl) =>
+    el("div", { className: "wv-form-row" }, [
+      el("label", {}, [label, el("span", { className: "wv-required" }, [" *"])]),
+      input,
+      errEl,
+    ]);
+
   // --- Left column: entry metadata ---
   // Default the name to the current ComfyUI tab's name (blank if the tab is
   // unsaved/untitled). The user can overwrite it before saving.
@@ -120,16 +137,19 @@ function renderCreateForm(controller) {
     allTags: controller.state.tags || [],
     tagCounts: tagCountsFrom(controller.state.entries),
   });
-  const defaultStatus = controller.state.settings?.default_status || "draft";
+  // Status starts unselected ("None") and must be chosen before saving.
   const statusSelect = el(
     "select",
     { className: "wv-input" },
-    STATUS_ORDER.filter((s) => s !== "archived").map((s) => el("option", { value: s, selected: s === defaultStatus }, [STATUS_LABELS[s]]))
+    [
+      el("option", { value: "", selected: true }, ["Select a status…"]),
+      ...STATUS_ORDER.filter((s) => s !== "archived").map((s) => el("option", { value: s }, [STATUS_LABELS[s]])),
+    ]
   );
   const defaultFolderId = controller.wizardOptions?.defaultFolderId || "";
   controller.state.folders = controller.state.folders || [];
   const folderSelect = renderFolderSelect({ folders: controller.state.folders, selectedId: defaultFolderId });
-  const genTypePicker = renderGenTypePicker([], markDirty);
+  const genTypePicker = renderGenTypePicker([], () => { markDirty(); genErr.style.display = "none"; });
   const favSwitch = toggleField("Favorite", false, markDirty);
   const thumbField = renderThumbnailField({ currentUrl: null });
 
@@ -145,12 +165,17 @@ function renderCreateForm(controller) {
 
   const notesEditor = renderNotesEditor({ notes: [], onChange: markDirty });
 
+  // Clear each field's error as soon as the user addresses it.
+  nameInput.addEventListener("input", () => { nameErr.style.display = "none"; });
+  statusSelect.addEventListener("change", () => { statusErr.style.display = "none"; });
+  tagInput.addEventListener("change", () => { tagErr.style.display = "none"; });
+
   const left = el("div", { className: "wv-wizard-left" });
-  left.appendChild(requiredRow("Name", nameInput));
+  left.appendChild(reqRow("Name", nameInput, nameErr));
   left.appendChild(formRow("Description", descInput));
-  left.appendChild(formRow("Tags", tagInput));
-  left.appendChild(formRow("Status", statusSelect));
-  left.appendChild(formRow("Generation types", genTypePicker));
+  left.appendChild(reqRow("Tags", tagInput, tagErr));
+  left.appendChild(reqRow("Status", statusSelect, statusErr));
+  left.appendChild(reqRow("Generation types", genTypePicker, genErr));
   left.appendChild(formRow("Folder", folderSelect));
   left.appendChild(el("div", { className: "wv-form-row" }, [favSwitch]));
   left.appendChild(formRow("Thumbnail (optional)", thumbField));
@@ -255,12 +280,27 @@ function renderCreateForm(controller) {
     );
   };
   saveBtn.addEventListener("click", async () => {
-    const name = nameInput.value.trim();
-    if (!name) {
-      status.textContent = "Name is required.";
-      nameInput.focus();
+    // Validate required fields, surfacing an inline error on each missing one
+    // and jumping to the first so the user knows precisely what's needed.
+    const checks = [
+      [nameErr, !nameInput.value.trim(), "Name is required.", nameInput],
+      [tagErr, tagInput.getTags().length === 0, "Add at least one tag.", tagInput],
+      [statusErr, !statusSelect.value, "Choose a status.", statusSelect],
+      [genErr, genTypePicker.getSelected().length === 0, "Select at least one generation type.", genTypePicker],
+    ];
+    let firstBad = null;
+    for (const [errEl, bad, msg, focusEl] of checks) {
+      errEl.textContent = bad ? msg : "";
+      errEl.style.display = bad ? "" : "none";
+      if (bad && !firstBad) firstBad = focusEl;
+    }
+    if (firstBad) {
+      status.textContent = "Please complete the required fields.";
+      firstBad.focus?.();
+      firstBad.scrollIntoView?.({ block: "nearest" });
       return;
     }
+    const name = nameInput.value.trim();
     const workflow = getCurrentWorkflowJSON();
     if (countNodes(workflow) === 0) {
       status.textContent = "The canvas is empty — add nodes before saving.";
@@ -286,13 +326,15 @@ function renderCreateForm(controller) {
       const formData = new FormData();
       // Original source date per uploaded part, so converted files keep it.
       const mtimes = {};
-      const pickedThumb = thumbField.fileInput.files[0];
-      if (pickedThumb) {
-        // Small display thumbnail + untouched original (archival).
-        formData.append("thumbnail", await makeThumbnailFile(pickedThumb));
-        formData.append("thumbnail_source", pickedThumb);
-        mtimes.thumbnail = pickedThumb.lastModified;
-        mtimes.thumbnail_source = pickedThumb.lastModified;
+      // Display thumbnail + untouched original (archival). For a video this
+      // yields an animated WebP (converted server-side) or a still frame; for
+      // an image, a downscaled cover. See renderThumbnailField().getUpload().
+      const up = await thumbField.getUpload();
+      if (up) {
+        formData.append("thumbnail", up.thumbnail);
+        if (up.thumbnail_source) formData.append("thumbnail_source", up.thumbnail_source);
+        mtimes.thumbnail = up.mtime;
+        mtimes.thumbnail_source = up.mtime;
       }
 
       const examplesData = [];
@@ -331,12 +373,14 @@ function renderCreateForm(controller) {
     }
   });
 
-  const footer = el("div", { className: "wv-wizard-footer" }, [
-    el("span", { className: "wv-wizard-footer-hint" }, [el("i", { className: "pi pi-info-circle" }), " Name is required"]),
+  // Exposed (not appended here) so the wizard can mount it OUTSIDE the scroll
+  // body — a sticky footer inside the scroll area overlaps and steals clicks
+  // from the content above it (e.g. the thumbnail dropzone).
+  wrap.wizardFooter = el("div", { className: "wv-wizard-footer" }, [
+    el("span", { className: "wv-wizard-footer-hint" }, [el("i", { className: "pi pi-info-circle" }), " Fields marked * are required"]),
     status,
     saveBtn,
   ]);
-  wrap.appendChild(footer);
 
   return wrap;
 }

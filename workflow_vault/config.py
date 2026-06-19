@@ -19,7 +19,6 @@ EXTENSION_CONFIG_PATH = os.path.join(EXTENSION_DIR, "vault_config.json")
 DEFAULT_VAULT_SETTINGS = {
     "schema_version": "1.0",
     "show_archived": False,
-    "default_status": "draft",
     "default_thumbnail_behavior": "placeholder",
     "grid_columns": 3,
     "sort": "updated",

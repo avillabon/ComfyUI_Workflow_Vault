@@ -11,7 +11,6 @@ import { renderExamplesTab } from "./vault_examples_tab.js";
 import { renderDocsTab } from "./vault_docs_tab.js";
 import { renderTagInput, tagCountsFrom } from "./vault_tag_input.js";
 import { renderThumbnailField } from "./vault_thumbnail_input.js";
-import { makeThumbnailFile } from "./vault_image.js";
 import { renderMarkdown } from "./vault_markdown.js";
 
 const TABS = [
@@ -307,13 +306,15 @@ function renderEntryMetadataForm(controller, entry) {
             favorite: favSwitch.input.checked,
             folder_id: folderSelect.value === "__new__" ? null : folderSelect.value || null,
           };
-          const pickedThumb = thumbField.fileInput.files[0];
-          if (pickedThumb) {
-            // Small display thumbnail + untouched original (archival), both
-            // stamped with the original file's date.
-            formData.append("thumbnail", await makeThumbnailFile(pickedThumb));
-            formData.append("thumbnail_source", pickedThumb);
-            data.file_mtimes = { thumbnail: pickedThumb.lastModified, thumbnail_source: pickedThumb.lastModified };
+          // Display thumbnail + untouched original (archival), both stamped
+          // with the source date. For a video the picker yields an animated
+          // WebP (converted server-side) or a still frame; for an image, a
+          // downscaled cover. See renderThumbnailField().getUpload().
+          const up = await thumbField.getUpload();
+          if (up) {
+            formData.append("thumbnail", up.thumbnail);
+            if (up.thumbnail_source) formData.append("thumbnail_source", up.thumbnail_source);
+            data.file_mtimes = { thumbnail: up.mtime, thumbnail_source: up.mtime };
           }
           formData.append("data", JSON.stringify(data));
           await VaultAPI.updateEntryMetadata(entry.id, formData);

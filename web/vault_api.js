@@ -41,6 +41,7 @@ export const VaultAPI = {
   getSettings: () => getJSON("/workflow-vault/settings"),
   postSettings: (body) => postJSON("/workflow-vault/settings", body),
   browseFolder: () => postJSON("/workflow-vault/browse-folder", {}),
+  getFootprint: () => getJSON("/workflow-vault/footprint"),
   compressExamples: () => postJSON("/workflow-vault/compress-examples", {}),
   initialize: (vaultRoot) => postJSON("/workflow-vault/initialize", { vault_root: vaultRoot }),
 
@@ -96,6 +97,11 @@ export const VaultAPI = {
 
   exportUrl: (entryId) => {
     const route = `/workflow-vault/entries/${encodeURIComponent(entryId)}/export`;
+    return typeof api.apiURL === "function" ? api.apiURL(route) : route;
+  },
+
+  exportVaultUrl: () => {
+    const route = "/workflow-vault/export";
     return typeof api.apiURL === "function" ? api.apiURL(route) : route;
   },
 };

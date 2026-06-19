@@ -50,6 +50,32 @@ async function loadImage(file) {
   });
 }
 
+// Captures the currently-displayed frame of a <video> as a small WebP File,
+// downscaled to fit within maxDim. Used by the thumbnail picker's "pick a
+// frame" path, which runs entirely in the browser (no ffmpeg needed). Returns
+// null if the frame can't be read or encoded.
+export async function captureVideoFrameFile(video, { maxDim = THUMB_MAX_DIM, quality = THUMB_QUALITY } = {}) {
+  const sw = video?.videoWidth || 0;
+  const sh = video?.videoHeight || 0;
+  if (!sw || !sh) return null;
+  const scale = Math.min(1, maxDim / Math.max(sw, sh)); // never upscale
+  const w = Math.max(1, Math.round(sw * scale));
+  const h = Math.max(1, Math.round(sh * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  try {
+    ctx.drawImage(video, 0, 0, w, h);
+  } catch {
+    return null; // tainted/undecodable frame
+  }
+  const encoded = await encodeSmall(canvas, quality);
+  if (!encoded) return null;
+  return new File([encoded.blob], `cover.${encoded.ext}`, { type: encoded.blob.type });
+}
+
 // Returns a small File suitable to upload as the display thumbnail. On any
 // failure (decode/encode unsupported) it resolves to the original file so a
 // thumbnail is always produced.

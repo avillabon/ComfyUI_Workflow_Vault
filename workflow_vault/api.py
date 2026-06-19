@@ -211,10 +211,6 @@ async def post_settings(request):
     updates = {}
     if "show_archived" in body:
         updates["show_archived"] = bool(body["show_archived"])
-    if "default_status" in body:
-        if body["default_status"] not in entries.VALID_STATUSES:
-            return _error("Invalid default status.")
-        updates["default_status"] = body["default_status"]
     if "default_thumbnail_behavior" in body:
         updates["default_thumbnail_behavior"] = body["default_thumbnail_behavior"]
     if "grid_columns" in body:
@@ -419,6 +415,48 @@ async def get_export_entry(request):
         headers={
             "Content-Type": "application/zip",
             "Content-Disposition": f'attachment; filename="{slug}.zip"',
+        },
+    )
+
+
+@routes.get("/workflow-vault/footprint")
+async def get_footprint(request):
+    vault_root, err = _require_vault()
+    if err:
+        return err
+    # Walk off the event loop so a large vault doesn't block other requests.
+    data = await asyncio.get_event_loop().run_in_executor(
+        None, storage.compute_footprint, vault_root
+    )
+    return web.json_response(data)
+
+
+def _build_vault_zip(vault_root, arc_root):
+    """Zip the entire vault directory into memory, nested under arc_root."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _dirs, files in os.walk(vault_root):
+            for name in files:
+                abs_path = os.path.join(root, name)
+                rel = os.path.relpath(abs_path, vault_root)
+                zf.write(abs_path, os.path.join(arc_root, rel))
+    return buf.getvalue()
+
+
+@routes.get("/workflow-vault/export")
+async def get_export_vault(request):
+    vault_root, err = _require_vault()
+    if err:
+        return err
+    arc_root = os.path.basename(os.path.normpath(vault_root)) or "vault"
+    data = await asyncio.get_event_loop().run_in_executor(
+        None, _build_vault_zip, vault_root, arc_root
+    )
+    return web.Response(
+        body=data,
+        headers={
+            "Content-Type": "application/zip",
+            "Content-Disposition": f'attachment; filename="{arc_root}.zip"',
         },
     )
 

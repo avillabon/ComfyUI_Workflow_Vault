@@ -3,7 +3,6 @@
 
 import { el, showToast, confirmDialog, promptDialog, applyAccentColor } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
-import { STATUS_LABELS, STATUS_ORDER } from "./vault_modal.js";
 import { buildFolderTree, countEntriesInFolder, createFolder, renameFolder, moveFolder, deleteFolder } from "./vault_folders.js";
 
 // Optional grid-card fields the user can hide for a more minimal look.
@@ -68,19 +67,81 @@ export function renderGlobalSettings(controller) {
   );
   header.appendChild(el("div", { className: "wv-detail-title-area" }, [el("div", { className: "wv-detail-title" }, ["Vault Settings"])]));
   header.appendChild(el("div", { className: "wv-topbar-spacer" }));
+  // Save lives in the header so it stays reachable no matter how far the
+  // (now two-column) settings body is scrolled. Its handler reads the control
+  // values below at click time, so the forward references are safe.
+  const saveBtn = el(
+    "button",
+    {
+      className: "wv-btn wv-btn-primary wv-vs-header-save",
+      onclick: async () => {
+        saveBtn.disabled = true;
+        try {
+          await VaultAPI.postSettings({
+            show_archived: showArchivedSwitch.input.checked,
+            default_thumbnail_behavior: thumbBehaviorSelect.value,
+            accent_color: selectedAccent,
+            card_fields: Object.fromEntries(CARD_FIELD_DEFS.map(([k]) => [k, cardSwitches[k].input.checked])),
+            compress_examples_on_upload: compressSwitch.input.checked,
+            example_compress_format: compressFormat,
+            compress_thumbnail_source: sourceSwitch.input.checked,
+          });
+          controller.filters.showArchived = showArchivedSwitch.input.checked;
+          await controller.refresh();
+          showToast("Settings saved.", "success");
+        } catch (e) {
+          showToast(e.message, "error");
+        } finally {
+          saveBtn.disabled = false;
+        }
+      },
+    },
+    [el("i", { className: "pi pi-save" }), "Save settings"]
+  );
+  header.appendChild(saveBtn);
   header.appendChild(el("button", { className: "wv-icon-btn wv-icon-btn-lg", title: "Close", "aria-label": "Close", onclick: () => controller.requestClose() }, [el("i", { className: "pi pi-times" })]));
   wrap.appendChild(header);
 
-  const body = el("div", { className: "wv-settings-body wv-settings-body-narrow" });
+  const body = el("div", { className: "wv-settings-body wv-settings-body-tabbed" });
 
-  // --- Stats chips ---
-  const statGrid = el("div", { className: "wv-vs-stats" });
-  const stat = (label, value) =>
-    el("div", { className: "wv-vs-stat" }, [el("div", { className: "wv-vs-stat-label" }, [label]), el("div", { className: "wv-vs-stat-value" }, [value])]);
-  statGrid.appendChild(stat("Entries", String((state.entries || []).length)));
-  statGrid.appendChild(stat("Folders", String((state.folders || []).length)));
-  statGrid.appendChild(stat("Tags", String((state.tags || []).length)));
-  body.appendChild(statGrid);
+  // Tabbed layout: panels are grouped into sections shown one at a time, so the
+  // page stays short and never overflows horizontally (the old 2-column masonry
+  // spilled panels outside the modal at narrow widths).
+  const SETTINGS_TABS = [
+    { id: "general", label: "General" },
+    { id: "storage", label: "Storage" },
+    { id: "organize", label: "Organize" },
+  ];
+  const sections = {
+    general: el("div", { className: "wv-settings-section" }),
+    storage: el("div", { className: "wv-settings-section" }),
+    // Organize holds two list panels (Tags, Folders) that read better side by
+    // side on wide screens than stacked in a narrow centered column.
+    organize: el("div", { className: "wv-settings-section wv-settings-section-wide" }),
+  };
+  const tabBar = el("div", { className: "wv-tab-bar" });
+  const tabButtons = {};
+  const showTab = (id) => {
+    controller.settingsSection = id;
+    for (const t of SETTINGS_TABS) {
+      sections[t.id].style.display = t.id === id ? "" : "none";
+      tabButtons[t.id].classList.toggle("wv-tab-active", t.id === id);
+    }
+  };
+  for (const t of SETTINGS_TABS) {
+    const btn = el("button", { className: "wv-tab", onclick: () => showTab(t.id) }, [t.label]);
+    tabButtons[t.id] = btn;
+    tabBar.appendChild(btn);
+  }
+
+  // --- Footprint (Storage tab; sizes loaded asynchronously) ---
+  const footprintPanel = panel("Footprint", "pi pi-chart-pie", "How much disk space the vault uses on disk, and where it goes.");
+  const footprintBody = el("div", { className: "wv-vs-footprint" }, [el("div", { className: "wv-muted" }, ["Calculating…"])]);
+  footprintPanel.appendChild(footprintBody);
+  sections.storage.appendChild(footprintPanel);
+  VaultAPI.getFootprint()
+    .then((fp) => renderFootprint(footprintBody, fp))
+    .catch(() => footprintBody.replaceChildren(el("div", { className: "wv-muted" }, ["Couldn't calculate the vault footprint."])));
 
   // --- Vault location ---
   const locationInput = el("input", { className: "wv-input wv-mono", type: "text", placeholder: "New vault folder path", value: state.vault_root || "" });
@@ -134,15 +195,10 @@ export function renderGlobalSettings(controller) {
   const locPanel = panel("Vault location", "pi pi-folder", "Where entries and media are stored on disk.");
   locPanel.appendChild(el("div", { className: "wv-vs-location-row" }, [locationInput, locationBrowseBtn, changeBtn]));
   locPanel.appendChild(locationStatus);
-  body.appendChild(locPanel);
+  sections.general.appendChild(locPanel);
 
   // --- Defaults ---
   const showArchivedSwitch = switchEl(!!state.settings?.show_archived);
-  const defaultStatusSelect = el(
-    "select",
-    { className: "wv-input wv-vs-select" },
-    STATUS_ORDER.filter((s) => s !== "archived").map((s) => el("option", { value: s, selected: state.settings?.default_status === s }, [STATUS_LABELS[s]]))
-  );
   const thumbBehaviorSelect = el(
     "select",
     { className: "wv-input wv-vs-select" },
@@ -154,9 +210,8 @@ export function renderGlobalSettings(controller) {
 
   const defPanel = panel("Defaults", "pi pi-sliders-h", null);
   defPanel.appendChild(settingRow("Show archived entries by default", showArchivedSwitch));
-  defPanel.appendChild(settingRow("Default status for new entries", defaultStatusSelect));
   defPanel.appendChild(settingRow("When an entry has no thumbnail", thumbBehaviorSelect));
-  body.appendChild(defPanel);
+  sections.general.appendChild(defPanel);
 
   // --- Card display (cosmetic field toggles) ---
   const cardFields = state.settings?.card_fields || {};
@@ -171,7 +226,7 @@ export function renderGlobalSettings(controller) {
     cardSwitches[key] = sw;
     cardPanel.appendChild(settingRow(label, sw));
   }
-  body.appendChild(cardPanel);
+  sections.general.appendChild(cardPanel);
 
   // --- Appearance (accent color) ---
   let selectedAccent = state.settings?.accent_color || DEFAULT_ACCENT;
@@ -210,7 +265,7 @@ export function renderGlobalSettings(controller) {
   accentPanel.appendChild(
     settingRow("Accent color", el("div", { className: "wv-accent-controls" }, [swatchRow, colorInput]))
   );
-  body.appendChild(accentPanel);
+  sections.general.appendChild(accentPanel);
   syncAccent();
 
   // --- Storage (example image compression) ---
@@ -334,8 +389,18 @@ export function renderGlobalSettings(controller) {
       el("p", { className: "wv-muted wv-vs-hint" }, ["Compression is unavailable because Pillow isn't installed in this Python environment."])
     );
   }
-  body.appendChild(storagePanel);
+  sections.storage.appendChild(storagePanel);
   syncCompressUi();
+
+  // --- Backup (full-vault export) ---
+  const exportPanel = panel("Backup", "pi pi-download", "Download the entire vault — entries, media, versions, and settings — as a single .zip.");
+  exportPanel.appendChild(
+    el("a", { className: "wv-btn", href: VaultAPI.exportVaultUrl(), download: "", title: "Download the whole vault as a .zip" }, [
+      el("i", { className: "pi pi-download" }),
+      " Export vault (.zip)",
+    ])
+  );
+  sections.storage.appendChild(exportPanel);
 
   // --- Tags ---
   const tags = state.tags || [];
@@ -360,7 +425,7 @@ export function renderGlobalSettings(controller) {
     }
     tagPanel.appendChild(listEl);
   }
-  body.appendChild(tagPanel);
+  sections.organize.appendChild(tagPanel);
 
   // --- Folders ---
   const folders = state.folders || [];
@@ -397,44 +462,65 @@ export function renderGlobalSettings(controller) {
     walk(buildFolderTree(folders), 0);
     foldersPanel.appendChild(listEl);
   }
-  body.appendChild(foldersPanel);
+  sections.organize.appendChild(foldersPanel);
 
-  // --- Footer: save defaults ---
-  const settingsStatus = el("span", { className: "wv-vs-footer-status" });
-  const saveBtn = el(
-    "button",
-    {
-      className: "wv-btn wv-btn-primary",
-      onclick: async () => {
-        saveBtn.disabled = true;
-        settingsStatus.textContent = "";
-        try {
-          await VaultAPI.postSettings({
-            show_archived: showArchivedSwitch.input.checked,
-            default_status: defaultStatusSelect.value,
-            default_thumbnail_behavior: thumbBehaviorSelect.value,
-            accent_color: selectedAccent,
-            card_fields: Object.fromEntries(CARD_FIELD_DEFS.map(([k]) => [k, cardSwitches[k].input.checked])),
-            compress_examples_on_upload: compressSwitch.input.checked,
-            example_compress_format: compressFormat,
-            compress_thumbnail_source: sourceSwitch.input.checked,
-          });
-          controller.filters.showArchived = showArchivedSwitch.input.checked;
-          await controller.refresh();
-          showToast("Settings saved.", "success");
-        } catch (e) {
-          settingsStatus.textContent = e.message;
-        } finally {
-          saveBtn.disabled = false;
-        }
-      },
-    },
-    [el("i", { className: "pi pi-save" }), "Save settings"]
-  );
-  body.appendChild(el("div", { className: "wv-vs-footer" }, [settingsStatus, saveBtn]));
+  // Assemble: tab bar + the three sections; show the remembered (or first) tab.
+  body.appendChild(tabBar);
+  body.appendChild(sections.general);
+  body.appendChild(sections.storage);
+  body.appendChild(sections.organize);
+  showTab(SETTINGS_TABS.some((t) => t.id === controller.settingsSection) ? controller.settingsSection : "general");
 
   wrap.appendChild(body);
   return wrap;
+}
+
+// Fills the footprint panel once sizes come back from the backend: a stacked
+// proportion bar over the size buckets, a labelled legend, and count tiles.
+function renderFootprint(container, fp) {
+  const BUCKETS = [
+    ["examples", "Example media", "wv-fp-examples"],
+    ["thumbnails", "Thumbnails", "wv-fp-thumbnails"],
+    ["workflows", "Workflows", "wv-fp-workflows"],
+  ];
+  const total = Math.max(0, fp.total || 0);
+  // The bar shows how the media splits across the buckets above, so it's
+  // normalized to their sum and fills completely (vault metadata is excluded).
+  const shownTotal = BUCKETS.reduce((s, [k]) => s + Math.max(0, fp[k] || 0), 0) || 1;
+
+  const head = el("div", { className: "wv-fp-head" }, [
+    el("span", { className: "wv-fp-total-label" }, ["Total on disk"]),
+    el("span", { className: "wv-fp-total-value" }, [formatBytes(total)]),
+  ]);
+
+  const bar = el("div", { className: "wv-fp-bar" });
+  for (const [key, , cls] of BUCKETS) {
+    const bytes = Math.max(0, fp[key] || 0);
+    if (bytes > 0) {
+      bar.appendChild(el("div", { className: `wv-fp-seg ${cls}`, style: { width: `${(bytes / shownTotal) * 100}%` }, title: `${formatBytes(bytes)}` }));
+    }
+  }
+
+  const legend = el("div", { className: "wv-fp-legend" });
+  for (const [key, label, cls] of BUCKETS) {
+    legend.appendChild(
+      el("div", { className: "wv-fp-legend-item" }, [
+        el("span", { className: `wv-fp-dot ${cls}` }),
+        el("span", { className: "wv-fp-legend-label" }, [label]),
+        el("span", { className: "wv-fp-legend-value" }, [formatBytes(fp[key] || 0)]),
+      ])
+    );
+  }
+
+  const counts = el("div", { className: "wv-vs-stats wv-fp-counts" });
+  const tile = (label, value) =>
+    el("div", { className: "wv-vs-stat" }, [el("div", { className: "wv-vs-stat-label" }, [label]), el("div", { className: "wv-vs-stat-value" }, [String(value)])]);
+  counts.appendChild(tile("Workflows", fp.entries || 0));
+  counts.appendChild(tile("Versions", fp.versions || 0));
+  counts.appendChild(tile("Examples", fp.examples_count || 0));
+  counts.appendChild(tile("Tags", fp.tags || 0));
+
+  container.replaceChildren(head, bar, legend, counts);
 }
 
 async function renameTagAction(controller, tag) {

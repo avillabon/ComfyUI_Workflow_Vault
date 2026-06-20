@@ -1,6 +1,19 @@
 {
   "schema_version": "1.0",
   "show_archived": false,
-  "default_status": "draft",
-  "default_thumbnail_behavior": "placeholder"
+  "default_thumbnail_behavior": "placeholder",
+  "grid_columns": 3,
+  "sort": "updated",
+  "accent_color": "#4d9fff",
+  "compress_examples_on_upload": true,
+  "example_compress_format": "webp",
+  "compress_thumbnail_source": true,
+  "card_fields": {
+    "description": true,
+    "tags": true,
+    "versions": true,
+    "examples": true,
+    "date": true
+  },
+  "default_status": "draft"
 }

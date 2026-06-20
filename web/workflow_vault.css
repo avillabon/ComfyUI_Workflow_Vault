@@ -941,6 +941,88 @@
   color: #54565d;
 }
 
+/* Before/after compare slider. Two stacked stills; hovering the card sweeps a
+   wipe line that reveals the overlay ("before") over the thumbnail ("after").
+   The hover-zoom is suppressed here so it doesn't fight the clip. */
+/* The slider fills any positioned host (grid card or overview preview). */
+.wv-compare-slider {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.wv-card:hover .wv-card-thumb-compare img {
+  transform: none;
+}
+
+.wv-compare-slider img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+.wv-compare-overlay {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  will-change: clip-path;
+}
+
+.wv-compare-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.wv-compare-grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.95);
+  color: #333;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+/* Compact remove (×) button on the compare-image picker preview. */
+.wv-thumb-clear {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.wv-thumb-clear:hover {
+  background: rgba(0, 0, 0, 0.8);
+}
+
 /* Thumbnail overlays: status pill, favorite, and a bottom scrim. */
 .wv-card-thumb-scrim {
   position: absolute;
@@ -1610,16 +1692,25 @@
 /* Drop zones (thumbnail + media uploads)                                  */
 /* ---------------------------------------------------------------------- */
 
+/* Screen-reader-only utility, used to hide the file <input> behind each drop
+   zone. Hardened with !important + pointer-events:none because some host
+   ComfyUI frontend builds ship a global CSS reset (Tailwind/PrimeVue) whose
+   `input` rules outrank this low-specificity class and un-collapse the input —
+   it then overlaps the drop zone and silently eats clicks. The inputs are only
+   ever triggered programmatically (zone onclick → fileInput.click()), so
+   pointer-events:none does not affect their function. */
 .wv-visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+  pointer-events: none !important;
 }
 
 .wv-dropzone {

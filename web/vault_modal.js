@@ -5,9 +5,10 @@ import { el, formatDateOnly, showToast, confirmDialog, onActivate, toggleField }
 import { VaultAPI } from "./vault_api.js";
 import { openCurrentVersion } from "./vault_detail.js";
 import { renderFolderTree, folderPath } from "./vault_folders.js";
+import { buildCompareSlider } from "./vault_compare_slider.js";
 
 // Bump this on each edit to the current date (CalVer); shown in the footer.
-export const VAULT_VERSION = "2026.06.19";
+export const VAULT_VERSION = "2026.06.20";
 export const AUTHOR_NAME = "Alex Villabón";
 export const AUTHOR_URL = "https://www.youtube.com/@alexvillabon";
 export const REPO_URL = "https://github.com/avillabon/ComfyUI_Workflow_Vault";
@@ -520,7 +521,12 @@ function renderCard(entry, controller) {
   });
 
   const thumb = el("div", { className: "wv-card-thumb" });
-  if (entry.thumbnail) {
+  if (entry.thumbnail && entry.compare_image) {
+    // Before/after compare slider: thumbnail is the base ("after"), the compare
+    // image the revealed overlay ("before"). Hover sweeps the wipe.
+    thumb.classList.add("wv-card-thumb-compare");
+    thumb.appendChild(buildCompareSlider(entry));
+  } else if (entry.thumbnail) {
     thumb.appendChild(el("img", { src: VaultAPI.mediaUrl(entry.id, entry.thumbnail, entry.updated_at), alt: entry.name, loading: "lazy", decoding: "async" }));
   } else if (controller.state.settings?.default_thumbnail_behavior !== "blank") {
     thumb.appendChild(el("div", { className: "wv-card-thumb-placeholder" }, [el("i", { className: "pi pi-image" })]));

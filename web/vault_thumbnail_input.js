@@ -27,13 +27,19 @@ function isVideoFile(file) {
   return file && VIDEO_EXTS.includes(extOf(file.name));
 }
 
-export function renderThumbnailField({ currentUrl = null } = {}) {
+// A drag-and-drop image/video picker with an animated-vs-pick-a-frame fork for
+// videos. Used for both the entry thumbnail and the before/after compare
+// overlay — they share identical behavior. Options:
+//   clearable — show a × to remove an existing selection (compare overlay).
+//   noun      — wording for prompts/labels ("thumbnail" | "compare image").
+export function renderThumbnailField({ currentUrl = null, clearable = false, noun = "thumbnail" } = {}) {
   let objectUrl = null; // for image/video previews and frame picking
   // mode: "none" | "image" | "video-animated" | "video-frame"
   let mode = currentUrl ? "image" : "none";
   let videoFile = null; // the picked source video (archived as-is)
   let frameFile = null; // captured still frame (for "video-frame")
   let busy = false; // true while the choice / frame-pick UI is showing
+  let cleared = false; // true when an existing selection was explicitly removed
 
   const fileInput = el("input", {
     type: "file",
@@ -45,7 +51,7 @@ export function renderThumbnailField({ currentUrl = null } = {}) {
     className: "wv-dropzone wv-thumb-dropzone",
     role: "button",
     tabindex: "0",
-    "aria-label": "Choose or drop a thumbnail image or video",
+    "aria-label": `Choose or drop a ${noun} (image or video)`,
     onclick: () => {
       if (!busy) fileInput.click();
     },
@@ -64,6 +70,42 @@ export function renderThumbnailField({ currentUrl = null } = {}) {
     }
   }
 
+  // Reset to the empty prompt and remember that a prior selection was removed,
+  // so getUpload() can tell the backend to delete it. Only used when clearable.
+  function doClear() {
+    fileInput.value = "";
+    freeObjectUrl();
+    videoFile = null;
+    frameFile = null;
+    mode = "none";
+    cleared = true;
+    showPrompt();
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  // Appends a × remove button onto a preview (clearable fields only).
+  function maybeAddClear() {
+    if (!clearable) return;
+    const stop = (e) => e.stopPropagation();
+    zone.appendChild(
+      el(
+        "button",
+        {
+          type: "button",
+          className: "wv-thumb-clear",
+          title: `Remove ${noun}`,
+          "aria-label": `Remove ${noun}`,
+          onmousedown: stop,
+          onclick: (e) => {
+            stop(e);
+            doClear();
+          },
+        },
+        [el("i", { className: "pi pi-times" })]
+      )
+    );
+  }
+
   function showPrompt() {
     busy = false;
     clear(zone);
@@ -77,8 +119,9 @@ export function renderThumbnailField({ currentUrl = null } = {}) {
     busy = false;
     clear(zone);
     zone.classList.add("wv-thumb-has-image");
-    zone.appendChild(el("img", { src, alt: "Thumbnail preview", className: "wv-thumb-img" }));
+    zone.appendChild(el("img", { src, alt: `${noun} preview`, className: "wv-thumb-img" }));
     zone.appendChild(el("div", { className: "wv-thumb-change" }, ["Change"]));
+    maybeAddClear();
   }
 
   function showVideoPreview(src) {
@@ -89,6 +132,7 @@ export function renderThumbnailField({ currentUrl = null } = {}) {
       el("video", { src, className: "wv-thumb-img", autoplay: true, muted: true, loop: true, playsinline: true })
     );
     zone.appendChild(el("div", { className: "wv-thumb-change" }, ["Change"]));
+    maybeAddClear();
   }
 
   // Two-way fork shown right after a video is picked.
@@ -100,7 +144,7 @@ export function renderThumbnailField({ currentUrl = null } = {}) {
       e.stopPropagation();
       fn();
     };
-    zone.appendChild(el("div", { className: "wv-thumb-choice-title" }, ["What should this thumbnail be?"]));
+    zone.appendChild(el("div", { className: "wv-thumb-choice-title" }, [`What should this ${noun} be?`]));
     const row = el("div", { className: "wv-thumb-choice-row" });
     row.appendChild(
       el("button", { type: "button", className: "wv-btn wv-btn-primary wv-thumb-choice-btn", onclick: stop(() => chooseAnimated(src)) }, [
@@ -221,9 +265,13 @@ export function renderThumbnailField({ currentUrl = null } = {}) {
     freeObjectUrl();
     videoFile = null;
     frameFile = null;
+    if (file) cleared = false;
     if (!file) {
-      mode = currentUrl ? "image" : "none";
-      if (currentUrl) showImage(currentUrl);
+      // Revert to the existing saved asset — unless it was explicitly cleared,
+      // in which case stay on the empty prompt so the removal sticks.
+      const restore = currentUrl && !cleared;
+      mode = restore ? "image" : "none";
+      if (restore) showImage(currentUrl);
       else showPrompt();
       return;
     }
@@ -282,25 +330,28 @@ export function renderThumbnailField({ currentUrl = null } = {}) {
   const wrap = el("div", { className: "wv-thumb-field" }, [zone, fileInput]);
   wrap.fileInput = fileInput;
 
-  // Builds the upload parts for the current selection, or null if unchanged.
-  // Returns { thumbnail, thumbnail_source, mtime } where thumbnail is the small
-  // display file and thumbnail_source is the archival original (may equal the
-  // video, or be null for plain images that are their own source… kept here for
-  // parity with the existing flow).
+  // Builds the upload parts for the current selection.
+  //   { file, source, mtime } — file is the display asset (downscaled image,
+  //     captured frame, or raw video the backend converts to animated WebP);
+  //     source is the archival original. The caller maps these onto the right
+  //     form fields (thumbnail/thumbnail_source or compare_image/…_source).
+  //   { clear: true } — an existing selection was removed (clearable fields).
+  //   null — nothing changed.
   wrap.getUpload = async () => {
     if (mode === "video-animated" && videoFile) {
       // Raw video → backend converts to animated WebP; original archived.
-      return { thumbnail: videoFile, thumbnail_source: videoFile, mtime: videoFile.lastModified };
+      return { file: videoFile, source: videoFile, mtime: videoFile.lastModified };
     }
     if (mode === "video-frame" && frameFile && videoFile) {
       // Browser-captured still; original video still archived alongside it.
-      return { thumbnail: frameFile, thumbnail_source: videoFile, mtime: videoFile.lastModified };
+      return { file: frameFile, source: videoFile, mtime: videoFile.lastModified };
     }
     const picked = fileInput.files[0];
     if (picked && !isVideoFile(picked)) {
       // Plain image: downscale for display, keep the original as the source.
-      return { thumbnail: await makeThumbnailFile(picked), thumbnail_source: picked, mtime: picked.lastModified };
+      return { file: await makeThumbnailFile(picked), source: picked, mtime: picked.lastModified };
     }
+    if (clearable && cleared && currentUrl) return { clear: true };
     return null;
   };
 

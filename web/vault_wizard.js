@@ -152,12 +152,13 @@ function renderCreateForm(controller) {
   const genTypePicker = renderGenTypePicker([], () => { markDirty(); genErr.style.display = "none"; });
   const favSwitch = toggleField("Favorite", false, markDirty);
   const thumbField = renderThumbnailField({ currentUrl: null });
+  const compareField = renderThumbnailField({ currentUrl: null, clearable: true, noun: "compare image" });
 
   // --- Right column inputs: version + notes ---
   const customLabelInput = el("input", { className: "wv-input", type: "text", placeholder: "e.g. Initial version" });
   const versionNotesInput = el("textarea", { className: "wv-input wv-textarea", placeholder: "Notes for this version (Markdown supported)" });
 
-  for (const input of [nameInput, descInput, statusSelect, folderSelect, thumbField.fileInput, customLabelInput, versionNotesInput]) {
+  for (const input of [nameInput, descInput, statusSelect, folderSelect, thumbField.fileInput, compareField.fileInput, customLabelInput, versionNotesInput]) {
     input.addEventListener("input", markDirty);
     input.addEventListener("change", markDirty);
   }
@@ -179,6 +180,7 @@ function renderCreateForm(controller) {
   left.appendChild(formRow("Folder", folderSelect));
   left.appendChild(el("div", { className: "wv-form-row" }, [favSwitch]));
   left.appendChild(formRow("Thumbnail (optional)", thumbField));
+  left.appendChild(formRow("Compare image (optional)", compareField));
 
   // --- Right column: tabbed panel ---
   const examplesPanel = el("div", { className: "wv-wizard-tab-content" });
@@ -330,11 +332,19 @@ function renderCreateForm(controller) {
       // yields an animated WebP (converted server-side) or a still frame; for
       // an image, a downscaled cover. See renderThumbnailField().getUpload().
       const up = await thumbField.getUpload();
-      if (up) {
-        formData.append("thumbnail", up.thumbnail);
-        if (up.thumbnail_source) formData.append("thumbnail_source", up.thumbnail_source);
+      if (up?.file) {
+        formData.append("thumbnail", up.file);
+        if (up.source) formData.append("thumbnail_source", up.source);
         mtimes.thumbnail = up.mtime;
         mtimes.thumbnail_source = up.mtime;
+      }
+      // Optional before/after compare overlay (same image/video picker).
+      const cmp = await compareField.getUpload();
+      if (cmp?.file) {
+        formData.append("compare_image", cmp.file);
+        if (cmp.source) formData.append("compare_image_source", cmp.source);
+        mtimes.compare_image = cmp.mtime;
+        mtimes.compare_image_source = cmp.mtime;
       }
 
       const examplesData = [];

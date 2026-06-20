@@ -11,6 +11,7 @@ import { renderExamplesTab } from "./vault_examples_tab.js";
 import { renderDocsTab } from "./vault_docs_tab.js";
 import { renderTagInput, tagCountsFrom } from "./vault_tag_input.js";
 import { renderThumbnailField } from "./vault_thumbnail_input.js";
+import { buildCompareSlider } from "./vault_compare_slider.js";
 import { renderMarkdown } from "./vault_markdown.js";
 
 const TABS = [
@@ -123,7 +124,13 @@ function renderOverviewSummary(controller, entry) {
   // Thumbnail leads as the visual anchor.
   const thumb = el("div", { className: "wv-overview-thumb" });
   if (entry.thumbnail) {
-    thumb.appendChild(el("img", { src: VaultAPI.mediaUrl(entry.id, entry.thumbnail, entry.updated_at), alt: entry.name, loading: "lazy", decoding: "async" }));
+    if (entry.compare_image) {
+      // Same interactive before/after wipe as the grid card.
+      thumb.classList.add("wv-overview-thumb-compare");
+      thumb.appendChild(buildCompareSlider(entry));
+    } else {
+      thumb.appendChild(el("img", { src: VaultAPI.mediaUrl(entry.id, entry.thumbnail, entry.updated_at), alt: entry.name, loading: "lazy", decoding: "async" }));
+    }
     // Reveal the thumbnail (and its archived original) in the OS file manager,
     // matching the per-media button in the examples gallery.
     thumb.appendChild(
@@ -256,9 +263,14 @@ function renderEntryMetadataForm(controller, entry) {
   const thumbField = renderThumbnailField({
     currentUrl: entry.thumbnail ? VaultAPI.mediaUrl(entry.id, entry.thumbnail, entry.updated_at) : null,
   });
+  const compareField = renderThumbnailField({
+    currentUrl: entry.compare_image ? VaultAPI.mediaUrl(entry.id, entry.compare_image, entry.updated_at) : null,
+    clearable: true,
+    noun: "compare image",
+  });
 
   const markDirty = () => controller.setDirty(true);
-  for (const input of [nameInput, descInput, statusSelect, folderSelect, thumbField.fileInput]) {
+  for (const input of [nameInput, descInput, statusSelect, folderSelect, thumbField.fileInput, compareField.fileInput]) {
     input.addEventListener("input", markDirty);
     input.addEventListener("change", markDirty);
   }
@@ -277,6 +289,7 @@ function renderEntryMetadataForm(controller, entry) {
 
   const rightCol = el("div", { className: "wv-settings-side-col" });
   rightCol.appendChild(formRow("Thumbnail", thumbField));
+  rightCol.appendChild(formRow("Compare image", compareField));
   rightCol.appendChild(renderStatsTiles(entry));
 
   grid.appendChild(leftCol);
@@ -311,10 +324,20 @@ function renderEntryMetadataForm(controller, entry) {
           // WebP (converted server-side) or a still frame; for an image, a
           // downscaled cover. See renderThumbnailField().getUpload().
           const up = await thumbField.getUpload();
-          if (up) {
-            formData.append("thumbnail", up.thumbnail);
-            if (up.thumbnail_source) formData.append("thumbnail_source", up.thumbnail_source);
+          if (up?.file) {
+            formData.append("thumbnail", up.file);
+            if (up.source) formData.append("thumbnail_source", up.source);
             data.file_mtimes = { thumbnail: up.mtime, thumbnail_source: up.mtime };
+          }
+          // Optional before/after compare overlay (same image/video picker): a
+          // new asset, or an explicit removal (clear) of an existing one.
+          const cmp = await compareField.getUpload();
+          if (cmp?.file) {
+            formData.append("compare_image", cmp.file);
+            if (cmp.source) formData.append("compare_image_source", cmp.source);
+            data.file_mtimes = { ...(data.file_mtimes || {}), compare_image: cmp.mtime, compare_image_source: cmp.mtime };
+          } else if (cmp?.clear) {
+            data.compare_image_clear = true;
           }
           formData.append("data", JSON.stringify(data));
           await VaultAPI.updateEntryMetadata(entry.id, formData);
@@ -629,9 +652,11 @@ function renderExampleGalleryCard(entry, example) {
       }
     };
     if (notesEl) {
-      const overlay = item.type === "image";
-      notesEl.classList.toggle("wv-ex-notes-overlay", overlay);
-      (overlay ? mediaWrap : belowSlot).appendChild(notesEl);
+      // Always render the note as the below-media bar (matching the compare
+      // view), never as an on-image overlay.
+      notesEl.style.display = "";
+      notesEl.classList.remove("wv-ex-notes-overlay");
+      belowSlot.appendChild(notesEl);
     }
     filmButtons.forEach((btn, i) => btn.classList.toggle("wv-gallery-item-active", i === currentIdx));
   }
@@ -648,7 +673,14 @@ function renderExampleGalleryCard(entry, example) {
     // role pill would just overlap them — hide it while comparing.
     roleLabel.style.display = "none";
     actionBtn.style.display = "none";
-    if (notesEl) notesEl.style.display = "none";
+    // Keep the per-example note visible while comparing, but render it BELOW the
+    // slider (not overlaid) so it never covers the wipe area or the slider's own
+    // Input/Output labels — same placement non-image media already uses.
+    if (notesEl) {
+      notesEl.style.display = "";
+      notesEl.classList.remove("wv-ex-notes-overlay");
+      belowSlot.appendChild(notesEl);
+    }
     if (compareBtn) compareBtn.classList.add("wv-ex-compare-active");
     filmButtons.forEach((btn) => btn.classList.remove("wv-gallery-item-active"));
   }
@@ -666,12 +698,17 @@ function renderExampleGalleryCard(entry, example) {
     card.appendChild(filmstrip);
   }
 
-  show(0);
+  // Default to the before/after compare view when the example has a comparable
+  // image pair; the toggle button or any filmstrip thumbnail switches to single
+  // items. Otherwise just show the first media item.
+  if (imgInput && imgOutput) setCompare(true);
+  else show(0);
   return card;
 }
 
-// Before/after comparison: two images stacked, the top (input) revealed up to
-// a draggable divider via clip-path so both stay pixel-aligned.
+// Before/after comparison: two images stacked, the top (input) revealed up to a
+// hover-following divider via clip-path so both stay pixel-aligned. Matches the
+// thumbnail compare slider — move the cursor to wipe, no click needed.
 function renderCompareSlider(entry, inputItem, outputItem) {
   const wrap = el("div", { className: "wv-compare" });
   const base = el("img", { className: "wv-compare-img", src: VaultAPI.mediaUrl(entry.id, outputItem.file), alt: "Output", draggable: "false" });
@@ -681,7 +718,9 @@ function renderCompareSlider(entry, inputItem, outputItem) {
   const handle = el(
     "div",
     { className: "wv-compare-handle", tabindex: "0", role: "slider", "aria-label": "Comparison position", "aria-valuemin": "0", "aria-valuemax": "100" },
-    [el("i", { className: "pi pi-arrows-h" })]
+    // Wrap the icon in an absolutely-positioned grip (same as the thumbnail
+    // slider) so it isn't flex-shrunk by the thin handle bar into a flat oval.
+    [el("div", { className: "wv-compare-grip" }, [el("i", { className: "pi pi-arrows-h" })])]
   );
 
   wrap.appendChild(base);
@@ -702,23 +741,16 @@ function renderCompareSlider(entry, inputItem, outputItem) {
     if (rect.width) setPos(((clientX - rect.left) / rect.width) * 100);
   }
 
+  // Follow the cursor on hover (no click/drag needed); snap back to centre when
+  // the pointer leaves, matching the thumbnail compare slider.
   const move = (e) => fromX((e.touches ? e.touches[0] : e).clientX);
-  const up = () => {
-    document.removeEventListener("mousemove", move);
-    document.removeEventListener("mouseup", up);
-    document.removeEventListener("touchmove", move);
-    document.removeEventListener("touchend", up);
-  };
-  const down = (e) => {
+  const onTouch = (e) => {
     e.preventDefault();
-    fromX((e.touches ? e.touches[0] : e).clientX);
-    document.addEventListener("mousemove", move);
-    document.addEventListener("mouseup", up);
-    document.addEventListener("touchmove", move, { passive: false });
-    document.addEventListener("touchend", up);
+    if (e.touches[0]) fromX(e.touches[0].clientX);
   };
-  wrap.addEventListener("mousedown", down);
-  wrap.addEventListener("touchstart", down, { passive: false });
+  wrap.addEventListener("mousemove", move);
+  wrap.addEventListener("mouseleave", () => setPos(50));
+  wrap.addEventListener("touchmove", onTouch, { passive: false });
   handle.addEventListener("keydown", (e) => {
     if (e.key === "ArrowLeft") {
       e.preventDefault();

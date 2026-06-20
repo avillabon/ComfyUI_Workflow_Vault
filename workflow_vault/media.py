@@ -204,6 +204,53 @@ def save_thumbnail_source(vault_root, slug, data, filename, mtime=None, compress
     return f"thumbnails/{final_name}", compressed, None
 
 
+def save_compare_image(vault_root, slug, data, filename, mtime=None):
+    """Save the before/after compare overlay as thumbnails/compare.<ext>.
+
+    Mirrors save_thumbnail: a video source (MP4/MOV/WebM) is converted to an
+    animated WebP so the overlay loops, exactly like the display thumbnail. The
+    untouched original is archived separately via save_compare_image_source."""
+    ext = ext_of(filename)
+    if video.is_video_ext(ext):
+        webp_bytes = video.convert_to_animated_webp(data, ext)
+        if webp_bytes is None:
+            return None, (
+                "Could not convert the video to an animated compare image. "
+                "ffmpeg may be unavailable — try picking a single frame instead."
+            )
+        data = webp_bytes
+        ext = "webp"
+    elif ext not in THUMBNAIL_EXTS:
+        return None, "Unsupported compare image type."
+    tdir = storage.thumbnails_dir(vault_root, slug)
+    _clear_prefixed(tdir, "compare.")
+    final_name = copy_media_bytes(tdir, data, "compare." + ext, mtime=mtime)
+    return f"thumbnails/{final_name}", None
+
+
+def save_compare_image_source(vault_root, slug, data, filename, mtime=None):
+    """Archive the untouched compare overlay original as
+    thumbnails/compare_source.<ext> (mirrors save_thumbnail_source). A video is
+    kept as-is so the original stays drag-droppable behind the animated WebP.
+
+    The "compare_source." prefix is distinct from "compare." (the 8th char is
+    "_" not "."), so saving/clearing one never touches the other."""
+    ext = ext_of(filename)
+    if not video.is_video_ext(ext) and ext not in THUMBNAIL_EXTS:
+        return None, "Unsupported compare image source type."
+    tdir = storage.thumbnails_dir(vault_root, slug)
+    _clear_prefixed(tdir, "compare_source.")
+    final_name = copy_media_bytes(tdir, data, "compare_source." + ext, mtime=mtime)
+    return f"thumbnails/{final_name}", None
+
+
+def remove_compare_image(vault_root, slug):
+    """Delete any saved compare overlay and its archived source."""
+    tdir = storage.thumbnails_dir(vault_root, slug)
+    _clear_prefixed(tdir, "compare.")
+    _clear_prefixed(tdir, "compare_source.")
+
+
 def _resolve_referenced_path(vault_root, slug, manifest, rel_path):
     """Return the entry-relative path for rel_path if it is referenced by
     this entry's thumbnail or example media, else None.
@@ -216,6 +263,10 @@ def _resolve_referenced_path(vault_root, slug, manifest, rel_path):
     if (manifest.get("thumbnail") or "").replace("\\", "/") == rel_path:
         return rel_path
     if (manifest.get("thumbnail_source") or "").replace("\\", "/") == rel_path:
+        return rel_path
+    if (manifest.get("compare_image") or "").replace("\\", "/") == rel_path:
+        return rel_path
+    if (manifest.get("compare_image_source") or "").replace("\\", "/") == rel_path:
         return rel_path
     for example in storage.list_examples(vault_root, slug):
         prefix = f"examples/{example['dir']}/"

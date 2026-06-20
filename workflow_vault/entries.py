@@ -127,6 +127,8 @@ def create_entry(vault_root, data):
         "thumbnail": None,
         "thumbnail_source": None,
         "thumbnail_source_compressed": False,
+        "compare_image": None,
+        "compare_image_source": None,
         "folder_id": data.get("folder_id"),
         "current_version_id": None,
         "created_at": now,
@@ -168,6 +170,23 @@ def create_entry(vault_root, data):
             manifest["thumbnail_source"] = rel
             manifest["thumbnail_source_compressed"] = src_compressed
 
+    # Compare overlay is best-effort too — never discard the entry over it.
+    compare_image = data.get("compare_image")
+    if compare_image:
+        rel, merr = media_mod.save_compare_image(
+            vault_root, slug, compare_image["bytes"], compare_image["filename"], mtime=compare_image.get("mtime")
+        )
+        if not merr:
+            manifest["compare_image"] = rel
+        compare_image_source = data.get("compare_image_source")
+        if not merr and compare_image_source:
+            srel, serr = media_mod.save_compare_image_source(
+                vault_root, slug, compare_image_source["bytes"], compare_image_source["filename"],
+                mtime=compare_image_source.get("mtime"),
+            )
+            if not serr:
+                manifest["compare_image_source"] = srel
+
     storage.write_manifest(vault_root, slug, manifest)
 
     if manifest["folder_id"]:
@@ -195,7 +214,7 @@ def create_entry(vault_root, data):
     return entry_state, None
 
 
-def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None, thumbnail_source_file=None):
+def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None, thumbnail_source_file=None, compare_image_file=None, compare_image_source_file=None):
     """Returns (new_slug, error)."""
     new_slug = slug
 
@@ -259,6 +278,27 @@ def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None,
         if not merr:
             manifest["thumbnail_source"] = rel
             manifest["thumbnail_source_compressed"] = src_compressed
+
+    # Compare overlay: a new asset replaces it; an explicit clear removes it.
+    if compare_image_file:
+        rel, merr = media_mod.save_compare_image(
+            vault_root, new_slug, compare_image_file["bytes"], compare_image_file["filename"], mtime=compare_image_file.get("mtime")
+        )
+        if merr:
+            return new_slug, merr
+        manifest["compare_image"] = rel
+        manifest["compare_image_source"] = None
+        if compare_image_source_file:
+            srel, serr = media_mod.save_compare_image_source(
+                vault_root, new_slug, compare_image_source_file["bytes"], compare_image_source_file["filename"],
+                mtime=compare_image_source_file.get("mtime"),
+            )
+            if not serr:
+                manifest["compare_image_source"] = srel
+    elif data.get("compare_image_clear"):
+        media_mod.remove_compare_image(vault_root, new_slug)
+        manifest["compare_image"] = None
+        manifest["compare_image_source"] = None
 
     if "notes" in data:
         storage.write_notes(vault_root, new_slug, normalize_notes(data["notes"]))

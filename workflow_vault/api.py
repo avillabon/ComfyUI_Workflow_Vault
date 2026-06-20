@@ -291,6 +291,10 @@ async def post_create_entry(request):
         data["thumbnail"] = files["thumbnail"]
     if "thumbnail_source" in files:
         data["thumbnail_source"] = files["thumbnail_source"]
+    if "compare_image" in files:
+        data["compare_image"] = files["compare_image"]
+    if "compare_image_source" in files:
+        data["compare_image_source"] = files["compare_image_source"]
 
     for i, example in enumerate(data.get("examples") or []):
         example["input_files"] = _collect_indexed_files(files, f"example_{i}_input_", example.get("input_labels"))
@@ -317,7 +321,9 @@ async def post_entry_metadata(request):
     except _MultipartError as e:
         return _error(str(e))
     new_slug, err_msg = entries.update_entry_metadata(
-        vault_root, manifest, slug, data, files.get("thumbnail"), files.get("thumbnail_source")
+        vault_root, manifest, slug, data, files.get("thumbnail"), files.get("thumbnail_source"),
+        compare_image_file=files.get("compare_image"),
+        compare_image_source_file=files.get("compare_image_source"),
     )
     if err_msg:
         return _error(err_msg)

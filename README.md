@@ -16,11 +16,11 @@ folder you choose on disk. No database, no account, no cloud sync.
 2. Restart ComfyUI.
 3. The backend uses the standard library plus `aiohttp` and `Pillow`, both
    already bundled by ComfyUI. The only extra dependency is `imageio-ffmpeg`,
-   which ships a self-contained ffmpeg binary used to convert **video
-   thumbnails** into animated WebP previews — many setups already have it (e.g.
-   VideoHelperSuite depends on it). Everything degrades gracefully: without
-   Pillow, image compression is skipped; without ffmpeg, you can still pick a
-   still frame from a video for the thumbnail.
+   which ships a self-contained ffmpeg binary used to convert **videos** (for
+   thumbnails and compare images) into animated WebP previews — many setups
+   already have it (e.g. VideoHelperSuite depends on it). Everything degrades
+   gracefully: without Pillow, image compression is skipped; without ffmpeg, you
+   can still pick a still frame from a video.
 
 ## First run
 
@@ -61,6 +61,12 @@ example media already filled in. You can switch to your own folder later from
   automatically in the grid. Optional card fields (description, tags, version
   count, example count, date) are individually toggleable in settings for a
   cleaner look.
+- **Before/after compare thumbnails** — give an entry an optional second
+  "compare image" and its card shows a **hover-to-wipe compare slider**: move
+  the cursor left/right across the card to reveal the thumbnail ("after") versus
+  the compare image ("before"). The compare image accepts the same formats as
+  the thumbnail (image *or* video, animated or a captured still). Entries
+  without one fall back to the normal hover-zoom thumbnail.
 - **Accent color** — a single color tints all icons and the logo throughout the
   UI. Choose from preset swatches or a custom color picker; changes preview
   live before saving.
@@ -70,8 +76,10 @@ example media already filled in. You can switch to your own folder later from
 - **Overview tab** — a read-only summary (description, tags, status, folder,
   generation type, and the thumbnail with **Open folder** and **Export (.zip)**
   buttons — the latter downloads the whole entry as a zip) followed by a full
-  gallery of example media. Each example supports a before/after compare slider
-  for image input/output pairs, a "reveal in folder" button per media item, and
+  gallery of example media. When the entry has a compare image, the Overview
+  thumbnail itself becomes the same hover-to-wipe compare slider used on the
+  grid card. Each example supports a before/after compare slider for image
+  input/output pairs, a "reveal in folder" button per media item, and
   per-example notes.
 - **Notes tab** — one or more Markdown notes per entry, shown as sub-tabs you
   can add, rename, and delete. Notes render as Markdown with a toggle for
@@ -108,6 +116,11 @@ example media already filled in. You can switch to your own folder later from
     in the browser (no ffmpeg needed).
   The untouched original (image or video) is kept as a separate archival source
   either way, and original file dates are preserved.
+- **Compare image** (optional) — a second media slot with the exact same picker
+  and behavior as the thumbnail (image or video, animated or captured still).
+  When set, it becomes the "before" layer of the hover compare slider on the
+  grid card and Overview preview. Its untouched original is archived too, and a
+  × clears it. Also editable later from **Settings → Workflow Details**.
 
 ### Folder management
 
@@ -174,8 +187,10 @@ Vault Settings (⚙) is organized into three tabs:
       manifest.json
       notes.json
       thumbnails/
-        cover.<ext>         ← display thumbnail (image, animated WebP, or still)
-        source.<ext>        ← archival original (image or video)
+        cover.<ext>          ← display thumbnail (image, animated WebP, or still)
+        source.<ext>         ← archival original (image or video)
+        compare.<ext>        ← optional compare "before" image (animated WebP or still)
+        compare_source.<ext> ← archival original of the compare image
       versions/
         v001/{version.json, workflow.json}
         ...

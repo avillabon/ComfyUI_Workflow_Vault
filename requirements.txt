@@ -5,8 +5,9 @@
 Pillow
 
 # imageio-ffmpeg ships a self-contained, cross-platform ffmpeg binary (no
-# system install). It powers MP4/MOV/WebM thumbnail -> animated-WebP previews.
-# Many ComfyUI users already have it (VideoHelperSuite depends on it). If the
-# binary is somehow unavailable, video thumbnails fall back to picking a single
-# frame in the browser; image thumbnails are unaffected.
+# system install). It powers MP4/MOV/WebM -> animated-WebP previews for both
+# thumbnails and the optional before/after compare image. Many ComfyUI users
+# already have it (VideoHelperSuite depends on it). If the binary is somehow
+# unavailable, videos fall back to picking a single frame in the browser; image
+# thumbnails/compare images are unaffected.
 imageio-ffmpeg

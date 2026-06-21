@@ -10,9 +10,11 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
-# --- Build artifacts (packaged node from package.ps1) ---
-package.ps1
+# --- Build artifacts / archives ---
 *.zip
+
+# --- Local-only: kept on disk for development, not published ---
+tests/
 
 # --- Standalone app build (not part of the published node) ---
 standalone_app/

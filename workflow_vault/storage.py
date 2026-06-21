@@ -13,6 +13,10 @@ def entries_dir(vault_root):
     return os.path.join(vault_root, "entries")
 
 
+def staging_entry_prefix():
+    return ".wv_staging_"
+
+
 def entry_dir(vault_root, slug):
     return os.path.join(entries_dir(vault_root), slug)
 
@@ -47,6 +51,8 @@ def list_entry_slugs(vault_root):
         return []
     slugs = []
     for name in sorted(os.listdir(edir)):
+        if name.startswith(staging_entry_prefix()):
+            continue
         full = os.path.join(edir, name)
         if os.path.isdir(full) and os.path.isfile(os.path.join(full, "manifest.json")):
             slugs.append(name)
@@ -257,3 +263,158 @@ def build_state(vault_root):
         "entries": entries,
         "tags": all_tags(vault_root),
     }
+
+
+def health_report(vault_root):
+    """Return a non-mutating consistency report for the vault.
+
+    The report is intentionally conservative: it lists issues the UI can show
+    or a future repair flow can act on, but it never edits user data.
+    """
+    issues = []
+    summary = {
+        "entries": 0,
+        "versions": 0,
+        "examples": 0,
+        "staging_entries": 0,
+        "orphan_entry_dirs": 0,
+        "missing_files": 0,
+        "folder_reference_issues": 0,
+    }
+
+    edir = entries_dir(vault_root)
+    entry_ids = set()
+    folders = read_folders(vault_root)
+    folder_ids = {f.get("id") for f in folders if f.get("id")}
+
+    if os.path.isdir(edir):
+        for name in sorted(os.listdir(edir)):
+            full = os.path.join(edir, name)
+            if not os.path.isdir(full):
+                continue
+            if name.startswith(staging_entry_prefix()):
+                summary["staging_entries"] += 1
+                issues.append({
+                    "severity": "warning",
+                    "type": "staging_entry",
+                    "path": os.path.relpath(full, vault_root).replace("\\", "/"),
+                    "message": "Interrupted entry save staging folder can be cleaned up.",
+                })
+                continue
+            if not os.path.isfile(os.path.join(full, "manifest.json")):
+                summary["orphan_entry_dirs"] += 1
+                issues.append({
+                    "severity": "warning",
+                    "type": "orphan_entry_dir",
+                    "path": os.path.relpath(full, vault_root).replace("\\", "/"),
+                    "message": "Entry folder has no manifest.json and is not shown in the vault.",
+                })
+
+    for slug in list_entry_slugs(vault_root):
+        manifest = read_manifest(vault_root, slug)
+        if not manifest:
+            continue
+        summary["entries"] += 1
+        entry_id = manifest.get("id")
+        if entry_id:
+            entry_ids.add(entry_id)
+        folder_id = manifest.get("folder_id")
+        if folder_id and folder_id not in folder_ids:
+            summary["folder_reference_issues"] += 1
+            issues.append({
+                "severity": "warning",
+                "type": "missing_folder",
+                "entry_id": entry_id,
+                "entry_slug": slug,
+                "message": "Entry points at a folder id that does not exist.",
+            })
+
+        entry_root = entry_dir(vault_root, slug)
+        for key in ("thumbnail", "thumbnail_source", "compare_image", "compare_image_source"):
+            rel = (manifest.get(key) or "").replace("\\", "/")
+            if not rel:
+                continue
+            path = os.path.normpath(os.path.join(entry_root, rel))
+            if not utils.is_path_inside(entry_root, path) or not os.path.isfile(path):
+                summary["missing_files"] += 1
+                issues.append({
+                    "severity": "error",
+                    "type": "missing_media",
+                    "entry_id": entry_id,
+                    "entry_slug": slug,
+                    "field": key,
+                    "path": rel,
+                    "message": "Manifest references a media file that is missing or invalid.",
+                })
+
+        versions = list_versions(vault_root, slug)
+        summary["versions"] += len(versions)
+        for version in versions:
+            rel = version.get("workflow_file") or "workflow.json"
+            path = os.path.normpath(os.path.join(version_dir(vault_root, slug, version["dir"]), rel))
+            if not utils.is_path_inside(version_dir(vault_root, slug, version["dir"]), path) or not os.path.isfile(path):
+                summary["missing_files"] += 1
+                issues.append({
+                    "severity": "error",
+                    "type": "missing_workflow",
+                    "entry_id": entry_id,
+                    "entry_slug": slug,
+                    "version_id": version.get("id"),
+                    "path": rel,
+                    "message": "Version references a workflow file that is missing or invalid.",
+                })
+
+        examples = list_examples(vault_root, slug)
+        summary["examples"] += len(examples)
+        for example in examples:
+            ex_root = example_dir(vault_root, slug, example["dir"])
+            for item in example.get("inputs", []) + example.get("outputs", []):
+                rel = (item.get("file") or "").replace("\\", "/")
+                path = os.path.normpath(os.path.join(ex_root, rel))
+                if not utils.is_path_inside(ex_root, path) or not os.path.isfile(path):
+                    summary["missing_files"] += 1
+                    issues.append({
+                        "severity": "error",
+                        "type": "missing_example_media",
+                        "entry_id": entry_id,
+                        "entry_slug": slug,
+                        "example_id": example.get("id"),
+                        "media_id": item.get("id"),
+                        "path": rel,
+                        "message": "Example references a media file that is missing or invalid.",
+                    })
+
+    for folder in folders:
+        for entry_id in folder.get("entry_ids", []) or []:
+            if entry_id not in entry_ids:
+                summary["folder_reference_issues"] += 1
+                issues.append({
+                    "severity": "warning",
+                    "type": "stale_folder_entry",
+                    "folder_id": folder.get("id"),
+                    "entry_id": entry_id,
+                    "message": "Folder lists an entry id that does not exist.",
+                })
+
+    return {"ok": not issues, "summary": summary, "issues": issues}
+
+
+def cleanup_staging_entries(vault_root):
+    """Move interrupted staging folders to the OS trash where possible."""
+    edir = entries_dir(vault_root)
+    removed = []
+    failed = []
+    if not os.path.isdir(edir):
+        return {"removed": removed, "failed": failed}
+    for name in sorted(os.listdir(edir)):
+        if not name.startswith(staging_entry_prefix()):
+            continue
+        path = os.path.join(edir, name)
+        if not os.path.isdir(path) or not utils.is_path_inside(edir, path):
+            continue
+        try:
+            method = utils.send_to_trash(path)
+            removed.append({"path": os.path.relpath(path, vault_root).replace("\\", "/"), "method": method})
+        except OSError as e:
+            failed.append({"path": os.path.relpath(path, vault_root).replace("\\", "/"), "error": str(e)})
+    return {"removed": removed, "failed": failed}

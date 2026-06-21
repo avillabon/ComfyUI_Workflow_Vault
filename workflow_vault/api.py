@@ -1,22 +1,27 @@
 """REST-style backend endpoints for the Workflow Vault extension."""
 
 import asyncio
-import io
 import json
 import os
 import re
-import zipfile
 
 from aiohttp import web
 from server import PromptServer
 
-from . import config, entries, examples, folders, media, storage, utils, versions
+from . import config, entries, examples, exporting, folders, media, storage, utils, versions
 
 routes = PromptServer.instance.routes
 
 # Per-file upload ceiling for thumbnails and example media (defense against
 # accidental/oversized uploads filling memory or disk).
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024  # 256 MB
+MAX_MULTIPART_BYTES = 768 * 1024 * 1024  # 768 MB total per request
+
+# Mutating endpoints perform read/modify/write cycles across several plain
+# files. Serialize those cycles per vault root so concurrent browser tabs do
+# not clobber each other's manifest/folder/example updates inside one ComfyUI
+# process.
+_WRITE_LOCKS = {}
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +62,15 @@ def _require_entry(vault_root, entry_id):
     return slug, manifest, None
 
 
+def _write_lock(vault_root):
+    key = os.path.realpath(vault_root or "__workflow_vault_extension__")
+    lock = _WRITE_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _WRITE_LOCKS[key] = lock
+    return lock
+
+
 class _MultipartError(Exception):
     """Raised when a multipart request is malformed or a file is too large."""
 
@@ -68,6 +82,7 @@ async def _parse_multipart(request):
     wrap the call and translate it into a clean 400 response."""
     data = {}
     files = {}
+    request_total = {"bytes": 0}
     try:
         reader = await request.multipart()
         async for part in reader:
@@ -80,7 +95,7 @@ async def _parse_multipart(request):
                 if not isinstance(data, dict):
                     raise _MultipartError("'data' field must be a JSON object.")
             elif part.filename:
-                content = await _read_part_limited(part)
+                content = await _read_part_limited(part, request_total)
                 files[part.name] = {"filename": part.filename, "bytes": content}
             else:
                 await part.read(decode=False)
@@ -98,18 +113,25 @@ async def _parse_multipart(request):
     return data, files
 
 
-async def _read_part_limited(part):
-    """Read a multipart file part in chunks, enforcing MAX_UPLOAD_BYTES."""
+async def _read_part_limited(part, request_total=None):
+    """Read a multipart file part in chunks, enforcing per-file and request caps."""
     chunks = []
     total = 0
+    if request_total is None:
+        request_total = {"bytes": 0}
     while True:
         chunk = await part.read_chunk()
         if not chunk:
             break
         total += len(chunk)
+        request_total["bytes"] += len(chunk)
         if total > MAX_UPLOAD_BYTES:
             raise _MultipartError(
                 f"File '{part.filename}' exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB upload limit."
+            )
+        if request_total["bytes"] > MAX_MULTIPART_BYTES:
+            raise _MultipartError(
+                f"Upload exceeds the {MAX_MULTIPART_BYTES // (1024 * 1024)} MB request limit."
             )
         chunks.append(chunk)
     return b"".join(chunks)
@@ -263,13 +285,14 @@ async def post_initialize(request):
     ok, err = config.validate_vault_root(vault_root)
     if not ok:
         return _error(err)
-    config.initialize_vault(vault_root)
-    config.set_vault_root(vault_root)
-    return web.json_response({
-        "vault_root": vault_root,
-        "initialized": True,
-        "settings": config.load_vault_settings(vault_root),
-    })
+    async with _write_lock(vault_root):
+        config.initialize_vault(vault_root)
+        config.set_vault_root(vault_root)
+        return web.json_response({
+            "vault_root": vault_root,
+            "initialized": True,
+            "settings": config.load_vault_settings(vault_root),
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -300,10 +323,11 @@ async def post_create_entry(request):
         example["input_files"] = _collect_indexed_files(files, f"example_{i}_input_", example.get("input_labels"))
         example["output_files"] = _collect_indexed_files(files, f"example_{i}_output_", example.get("output_labels"))
 
-    entry, err_msg = entries.create_entry(vault_root, data)
-    if err_msg:
-        return _error(err_msg)
-    return web.json_response(entry)
+    async with _write_lock(vault_root):
+        entry, err_msg = entries.create_entry(vault_root, data)
+        if err_msg:
+            return _error(err_msg)
+        return web.json_response(entry)
 
 
 @routes.post("/workflow-vault/entries/{entry_id}/metadata")
@@ -312,22 +336,23 @@ async def post_entry_metadata(request):
     if err:
         return err
     entry_id = request.match_info["entry_id"]
-    slug, manifest, err = _require_entry(vault_root, entry_id)
-    if err:
-        return err
 
     try:
         data, files = await _parse_multipart(request)
     except _MultipartError as e:
         return _error(str(e))
-    new_slug, err_msg = entries.update_entry_metadata(
-        vault_root, manifest, slug, data, files.get("thumbnail"), files.get("thumbnail_source"),
-        compare_image_file=files.get("compare_image"),
-        compare_image_source_file=files.get("compare_image_source"),
-    )
-    if err_msg:
-        return _error(err_msg)
-    return web.json_response(storage.build_entry_state(vault_root, new_slug))
+    async with _write_lock(vault_root):
+        slug, manifest, err = _require_entry(vault_root, entry_id)
+        if err:
+            return err
+        new_slug, err_msg = entries.update_entry_metadata(
+            vault_root, manifest, slug, data, files.get("thumbnail"), files.get("thumbnail_source"),
+            compare_image_file=files.get("compare_image"),
+            compare_image_source_file=files.get("compare_image_source"),
+        )
+        if err_msg:
+            return _error(err_msg)
+        return web.json_response(storage.build_entry_state(vault_root, new_slug))
 
 
 @routes.post("/workflow-vault/entries/{entry_id}/archive")
@@ -347,8 +372,12 @@ async def post_archive_entry(request):
     else:
         body = {}
     archived = bool(body.get("archived", True))
-    entries.set_archived(vault_root, manifest, slug, archived, body.get("restore_status"))
-    return web.json_response(storage.build_entry_state(vault_root, slug))
+    async with _write_lock(vault_root):
+        slug, manifest, err = _require_entry(vault_root, entry_id)
+        if err:
+            return err
+        entries.set_archived(vault_root, manifest, slug, archived, body.get("restore_status"))
+        return web.json_response(storage.build_entry_state(vault_root, slug))
 
 
 @routes.post("/workflow-vault/entries/{entry_id}/duplicate")
@@ -367,10 +396,14 @@ async def post_duplicate_entry(request):
         return err
 
     new_name = (body.get("name") or "").strip()
-    state, err_msg = await asyncio.to_thread(entries.duplicate_entry, vault_root, slug, new_name)
-    if err_msg:
-        return _error(err_msg)
-    return web.json_response(state)
+    async with _write_lock(vault_root):
+        slug, _manifest, err = _require_entry(vault_root, entry_id)
+        if err:
+            return err
+        state, err_msg = await asyncio.to_thread(entries.duplicate_entry, vault_root, slug, new_name)
+        if err_msg:
+            return _error(err_msg)
+        return web.json_response(state)
 
 
 @routes.post("/workflow-vault/entries/{entry_id}/delete")
@@ -385,22 +418,37 @@ async def post_delete_entry(request):
     if err:
         return err
 
-    method, err_msg = await asyncio.to_thread(entries.delete_entry, vault_root, slug)
-    if err_msg:
-        return _error(err_msg)
-    return web.json_response({"ok": True, "method": method})
+    async with _write_lock(vault_root):
+        slug, _manifest, err = _require_entry(vault_root, entry_id)
+        if err:
+            return err
+        method, err_msg = await asyncio.to_thread(entries.delete_entry, vault_root, slug)
+        if err_msg:
+            return _error(err_msg)
+        return web.json_response({"ok": True, "method": method})
 
 
-def _build_entry_zip(edir, arc_root):
-    """Zip an entry directory into memory; entries are nested under arc_root."""
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, _dirs, files in os.walk(edir):
-            for name in files:
-                abs_path = os.path.join(root, name)
-                rel = os.path.relpath(abs_path, edir)
-                zf.write(abs_path, os.path.join(arc_root, rel))
-    return buf.getvalue()
+async def _stream_zip_response(request, zip_path, filename):
+    headers = {
+        "Content-Type": "application/zip",
+        "Content-Disposition": f'attachment; filename="{filename}"',
+    }
+    resp = web.StreamResponse(headers=headers)
+    await resp.prepare(request)
+    try:
+        with open(zip_path, "rb") as fh:
+            while True:
+                chunk = await asyncio.to_thread(fh.read, 1024 * 1024)
+                if not chunk:
+                    break
+                await resp.write(chunk)
+        await resp.write_eof()
+        return resp
+    finally:
+        try:
+            os.remove(zip_path)
+        except OSError:
+            pass
 
 
 @routes.get("/workflow-vault/entries/{entry_id}/export")
@@ -414,15 +462,8 @@ async def get_export_entry(request):
         return err
 
     edir = storage.entry_dir(vault_root, slug)
-    # Build the archive off the event loop so large media doesn't block.
-    data = await asyncio.get_event_loop().run_in_executor(None, _build_entry_zip, edir, slug)
-    return web.Response(
-        body=data,
-        headers={
-            "Content-Type": "application/zip",
-            "Content-Disposition": f'attachment; filename="{slug}.zip"',
-        },
-    )
+    zip_path = await asyncio.to_thread(exporting.build_zip_file, edir, slug)
+    return await _stream_zip_response(request, zip_path, f"{exporting.download_name(slug, 'entry')}.zip")
 
 
 @routes.get("/workflow-vault/footprint")
@@ -437,16 +478,24 @@ async def get_footprint(request):
     return web.json_response(data)
 
 
-def _build_vault_zip(vault_root, arc_root):
-    """Zip the entire vault directory into memory, nested under arc_root."""
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, _dirs, files in os.walk(vault_root):
-            for name in files:
-                abs_path = os.path.join(root, name)
-                rel = os.path.relpath(abs_path, vault_root)
-                zf.write(abs_path, os.path.join(arc_root, rel))
-    return buf.getvalue()
+@routes.get("/workflow-vault/health")
+async def get_health(request):
+    vault_root, err = _require_vault()
+    if err:
+        return err
+    data = await asyncio.to_thread(storage.health_report, vault_root)
+    return web.json_response(data)
+
+
+@routes.post("/workflow-vault/health/cleanup-staging")
+async def post_cleanup_staging(request):
+    vault_root, err = _require_vault()
+    if err:
+        return err
+    async with _write_lock(vault_root):
+        data = await asyncio.to_thread(storage.cleanup_staging_entries, vault_root)
+        report = storage.health_report(vault_root)
+    return web.json_response({"ok": not data["failed"], **data, "health": report})
 
 
 @routes.get("/workflow-vault/export")
@@ -455,16 +504,8 @@ async def get_export_vault(request):
     if err:
         return err
     arc_root = os.path.basename(os.path.normpath(vault_root)) or "vault"
-    data = await asyncio.get_event_loop().run_in_executor(
-        None, _build_vault_zip, vault_root, arc_root
-    )
-    return web.Response(
-        body=data,
-        headers={
-            "Content-Type": "application/zip",
-            "Content-Disposition": f'attachment; filename="{arc_root}.zip"',
-        },
-    )
+    zip_path = await asyncio.to_thread(exporting.build_zip_file, vault_root, arc_root, True)
+    return await _stream_zip_response(request, zip_path, f"{exporting.download_name(arc_root, 'vault')}.zip")
 
 
 @routes.post("/workflow-vault/entries/{entry_id}/reveal-media")
@@ -551,8 +592,9 @@ async def post_compress_examples(request):
         b = entries.compress_all_thumbnail_sources(vault_root)
         return {k: a[k] + b[k] for k in a}
 
-    stats = await asyncio.to_thread(_compress_all)
-    return web.json_response({"ok": True, **stats})
+    async with _write_lock(vault_root):
+        stats = await asyncio.to_thread(_compress_all)
+        return web.json_response({"ok": True, **stats})
 
 
 # ---------------------------------------------------------------------------
@@ -572,17 +614,21 @@ async def post_create_version(request):
     body, err = await _read_json(request)
     if err:
         return err
-    version, err_msg = versions.create_version(
-        vault_root, manifest, slug, body.get("workflow"),
-        label=body.get("label"),
-        custom_label=body.get("custom_label"),
-        notes=body.get("notes", ""),
-        make_current=body.get("make_current", True),
-    )
-    if err_msg:
-        return _error(err_msg)
-    storage.write_manifest(vault_root, slug, manifest)
-    return web.json_response(storage.build_entry_state(vault_root, slug))
+    async with _write_lock(vault_root):
+        slug, manifest, err = _require_entry(vault_root, entry_id)
+        if err:
+            return err
+        version, err_msg = versions.create_version(
+            vault_root, manifest, slug, body.get("workflow"),
+            label=body.get("label"),
+            custom_label=body.get("custom_label"),
+            notes=body.get("notes", ""),
+            make_current=body.get("make_current", True),
+        )
+        if err_msg:
+            return _error(err_msg)
+        storage.write_manifest(vault_root, slug, manifest)
+        return web.json_response(storage.build_entry_state(vault_root, slug))
 
 
 @routes.post("/workflow-vault/entries/{entry_id}/versions/{version_id}/overwrite")
@@ -599,12 +645,16 @@ async def post_overwrite_version(request):
     body, err = await _read_json(request)
     if err:
         return err
-    version, err_msg = versions.overwrite_version(
-        vault_root, manifest, slug, version_id, body.get("workflow"), body.get("notes"))
-    if err_msg:
-        return _error(err_msg)
-    storage.write_manifest(vault_root, slug, manifest)
-    return web.json_response(storage.build_entry_state(vault_root, slug))
+    async with _write_lock(vault_root):
+        slug, manifest, err = _require_entry(vault_root, entry_id)
+        if err:
+            return err
+        version, err_msg = versions.overwrite_version(
+            vault_root, manifest, slug, version_id, body.get("workflow"), body.get("notes"))
+        if err_msg:
+            return _error(err_msg)
+        storage.write_manifest(vault_root, slug, manifest)
+        return web.json_response(storage.build_entry_state(vault_root, slug))
 
 
 @routes.post("/workflow-vault/entries/{entry_id}/versions/{version_id}/promote")
@@ -618,11 +668,15 @@ async def post_promote_version(request):
     if err:
         return err
 
-    version, err_msg = versions.promote_version(vault_root, manifest, slug, version_id)
-    if err_msg:
-        return _error(err_msg)
-    storage.write_manifest(vault_root, slug, manifest)
-    return web.json_response(storage.build_entry_state(vault_root, slug))
+    async with _write_lock(vault_root):
+        slug, manifest, err = _require_entry(vault_root, entry_id)
+        if err:
+            return err
+        version, err_msg = versions.promote_version(vault_root, manifest, slug, version_id)
+        if err_msg:
+            return _error(err_msg)
+        storage.write_manifest(vault_root, slug, manifest)
+        return web.json_response(storage.build_entry_state(vault_root, slug))
 
 
 @routes.post("/workflow-vault/entries/{entry_id}/versions/{version_id}")
@@ -639,11 +693,15 @@ async def post_update_version(request):
     body, err = await _read_json(request)
     if err:
         return err
-    version, err_msg = versions.update_version_notes(vault_root, manifest, slug, version_id, body.get("notes", ""))
-    if err_msg:
-        return _error(err_msg)
-    storage.write_manifest(vault_root, slug, manifest)
-    return web.json_response(storage.build_entry_state(vault_root, slug))
+    async with _write_lock(vault_root):
+        slug, manifest, err = _require_entry(vault_root, entry_id)
+        if err:
+            return err
+        version, err_msg = versions.update_version_notes(vault_root, manifest, slug, version_id, body.get("notes", ""))
+        if err_msg:
+            return _error(err_msg)
+        storage.write_manifest(vault_root, slug, manifest)
+        return web.json_response(storage.build_entry_state(vault_root, slug))
 
 
 @routes.get("/workflow-vault/entries/{entry_id}/versions/{version_id}/workflow")
@@ -684,14 +742,18 @@ async def post_create_example(request):
     input_files = _collect_indexed_files(files, "input_", data.get("input_labels"))
     output_files = _collect_indexed_files(files, "output_", data.get("output_labels"))
 
-    example, err_msg, skipped = examples.create_example(vault_root, manifest, slug, data, input_files, output_files)
-    if err_msg:
-        return _error(err_msg)
-    storage.write_manifest(vault_root, slug, manifest)
-    state = storage.build_entry_state(vault_root, slug)
-    if skipped:
-        state["skipped_files"] = skipped
-    return web.json_response(state)
+    async with _write_lock(vault_root):
+        slug, manifest, err = _require_entry(vault_root, entry_id)
+        if err:
+            return err
+        example, err_msg, skipped = examples.create_example(vault_root, manifest, slug, data, input_files, output_files)
+        if err_msg:
+            return _error(err_msg)
+        storage.write_manifest(vault_root, slug, manifest)
+        state = storage.build_entry_state(vault_root, slug)
+        if skipped:
+            state["skipped_files"] = skipped
+        return web.json_response(state)
 
 
 @routes.post("/workflow-vault/entries/{entry_id}/examples/reorder")
@@ -711,11 +773,15 @@ async def post_reorder_examples(request):
     if not isinstance(order, list):
         return _error("'order' must be a list of example ids.")
 
-    ok, err_msg = examples.reorder_examples(vault_root, manifest, slug, order)
-    if not ok:
-        return _error(err_msg)
-    storage.write_manifest(vault_root, slug, manifest)
-    return web.json_response(storage.build_entry_state(vault_root, slug))
+    async with _write_lock(vault_root):
+        slug, manifest, err = _require_entry(vault_root, entry_id)
+        if err:
+            return err
+        ok, err_msg = examples.reorder_examples(vault_root, manifest, slug, order)
+        if not ok:
+            return _error(err_msg)
+        storage.write_manifest(vault_root, slug, manifest)
+        return web.json_response(storage.build_entry_state(vault_root, slug))
 
 
 @routes.post("/workflow-vault/entries/{entry_id}/examples/{example_id}")
@@ -736,15 +802,19 @@ async def post_update_example(request):
     new_input_files = _collect_indexed_files(files, "new_input_", data.get("new_input_labels"))
     new_output_files = _collect_indexed_files(files, "new_output_", data.get("new_output_labels"))
 
-    example, err_msg, skipped = examples.update_example(
-        vault_root, manifest, slug, example_id, data, new_input_files, new_output_files)
-    if err_msg:
-        return _error(err_msg)
-    storage.write_manifest(vault_root, slug, manifest)
-    state = storage.build_entry_state(vault_root, slug)
-    if skipped:
-        state["skipped_files"] = skipped
-    return web.json_response(state)
+    async with _write_lock(vault_root):
+        slug, manifest, err = _require_entry(vault_root, entry_id)
+        if err:
+            return err
+        example, err_msg, skipped = examples.update_example(
+            vault_root, manifest, slug, example_id, data, new_input_files, new_output_files)
+        if err_msg:
+            return _error(err_msg)
+        storage.write_manifest(vault_root, slug, manifest)
+        state = storage.build_entry_state(vault_root, slug)
+        if skipped:
+            state["skipped_files"] = skipped
+        return web.json_response(state)
 
 
 @routes.post("/workflow-vault/entries/{entry_id}/examples/{example_id}/delete")
@@ -758,11 +828,15 @@ async def post_delete_example(request):
     if err:
         return err
 
-    ok, err_msg = examples.delete_example(vault_root, manifest, slug, example_id)
-    if not ok:
-        return _error(err_msg)
-    storage.write_manifest(vault_root, slug, manifest)
-    return web.json_response(storage.build_entry_state(vault_root, slug))
+    async with _write_lock(vault_root):
+        slug, manifest, err = _require_entry(vault_root, entry_id)
+        if err:
+            return err
+        ok, err_msg = examples.delete_example(vault_root, manifest, slug, example_id)
+        if not ok:
+            return _error(err_msg)
+        storage.write_manifest(vault_root, slug, manifest)
+        return web.json_response(storage.build_entry_state(vault_root, slug))
 
 
 # ---------------------------------------------------------------------------
@@ -777,10 +851,11 @@ async def post_create_folder(request):
     body, err = await _read_json(request)
     if err:
         return err
-    folder, err_msg = folders.create_folder(vault_root, body.get("name"), body.get("parent_id"))
-    if err_msg:
-        return _error(err_msg)
-    return web.json_response({"folder": folder, "folders": storage.read_folders(vault_root)})
+    async with _write_lock(vault_root):
+        folder, err_msg = folders.create_folder(vault_root, body.get("name"), body.get("parent_id"))
+        if err_msg:
+            return _error(err_msg)
+        return web.json_response({"folder": folder, "folders": storage.read_folders(vault_root)})
 
 
 @routes.post("/workflow-vault/folders/{folder_id}")
@@ -799,10 +874,11 @@ async def post_update_folder(request):
     if "parent_id" in body:
         kwargs["parent_id"] = body["parent_id"]
 
-    folder, err_msg = folders.update_folder(vault_root, folder_id, **kwargs)
-    if err_msg:
-        return _error(err_msg)
-    return web.json_response({"folder": folder, "folders": storage.read_folders(vault_root)})
+    async with _write_lock(vault_root):
+        folder, err_msg = folders.update_folder(vault_root, folder_id, **kwargs)
+        if err_msg:
+            return _error(err_msg)
+        return web.json_response({"folder": folder, "folders": storage.read_folders(vault_root)})
 
 
 @routes.post("/workflow-vault/folders/{folder_id}/delete")
@@ -812,10 +888,11 @@ async def post_delete_folder(request):
         return err
     folder_id = request.match_info["folder_id"]
 
-    ok, err_msg = folders.delete_folder(vault_root, folder_id)
-    if not ok:
-        return _error(err_msg)
-    return web.json_response(_full_state(vault_root))
+    async with _write_lock(vault_root):
+        ok, err_msg = folders.delete_folder(vault_root, folder_id)
+        if not ok:
+            return _error(err_msg)
+        return web.json_response(_full_state(vault_root))
 
 
 # ---------------------------------------------------------------------------
@@ -830,10 +907,11 @@ async def post_rename_tag(request):
     body, err = await _read_json(request)
     if err:
         return err
-    count, err_msg = entries.rename_tag(vault_root, body.get("from"), body.get("to"))
-    if err_msg:
-        return _error(err_msg)
-    return web.json_response({"updated": count, **_full_state(vault_root)})
+    async with _write_lock(vault_root):
+        count, err_msg = entries.rename_tag(vault_root, body.get("from"), body.get("to"))
+        if err_msg:
+            return _error(err_msg)
+        return web.json_response({"updated": count, **_full_state(vault_root)})
 
 
 @routes.post("/workflow-vault/tags/delete")
@@ -844,10 +922,11 @@ async def post_delete_tag(request):
     body, err = await _read_json(request)
     if err:
         return err
-    count, err_msg = entries.delete_tag(vault_root, body.get("tag"))
-    if err_msg:
-        return _error(err_msg)
-    return web.json_response({"updated": count, **_full_state(vault_root)})
+    async with _write_lock(vault_root):
+        count, err_msg = entries.delete_tag(vault_root, body.get("tag"))
+        if err_msg:
+            return _error(err_msg)
+        return web.json_response({"updated": count, **_full_state(vault_root)})
 
 
 # ---------------------------------------------------------------------------

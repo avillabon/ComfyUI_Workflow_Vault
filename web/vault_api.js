@@ -32,8 +32,48 @@ function postJSON(route, body) {
     .then(handle);
 }
 
-function postForm(route, formData) {
-  return api.fetchApi(route, { method: "POST", body: formData }).then(handle);
+function postForm(route, formData, options = {}) {
+  if (typeof options.onProgress !== "function") {
+    return api.fetchApi(route, { method: "POST", body: formData }).then(handle);
+  }
+  return postFormWithProgress(route, formData, options.onProgress);
+}
+
+function postFormWithProgress(route, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const url = typeof api.apiURL === "function" ? api.apiURL(route) : route;
+    xhr.open("POST", url, true);
+    xhr.responseType = "text";
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        onProgress({ phase: "upload", loaded: event.loaded, total: event.total, percent: Math.round((event.loaded / event.total) * 100) });
+      } else {
+        onProgress({ phase: "upload", loaded: event.loaded, total: 0, percent: null });
+      }
+    };
+    xhr.upload.onload = () => onProgress({ phase: "processing", percent: 100 });
+    xhr.onload = () => {
+      let payload = {};
+      try {
+        payload = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+      } catch {
+        payload = {};
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(payload);
+        return;
+      }
+      const err = new Error(payload.error || `Request failed (${xhr.status})`);
+      err.status = xhr.status;
+      err.data = payload;
+      reject(err);
+    };
+    xhr.onerror = () => reject(new Error("Upload failed."));
+    xhr.onabort = () => reject(new Error("Upload cancelled."));
+    onProgress({ phase: "starting", percent: 0 });
+    xhr.send(formData);
+  });
 }
 
 export const VaultAPI = {
@@ -42,12 +82,14 @@ export const VaultAPI = {
   postSettings: (body) => postJSON("/workflow-vault/settings", body),
   browseFolder: () => postJSON("/workflow-vault/browse-folder", {}),
   getFootprint: () => getJSON("/workflow-vault/footprint"),
+  getHealth: () => getJSON("/workflow-vault/health"),
+  cleanupStaging: () => postJSON("/workflow-vault/health/cleanup-staging", {}),
   compressExamples: () => postJSON("/workflow-vault/compress-examples", {}),
   initialize: (vaultRoot) => postJSON("/workflow-vault/initialize", { vault_root: vaultRoot }),
 
-  createEntry: (formData) => postForm("/workflow-vault/entries", formData),
-  updateEntryMetadata: (entryId, formData) =>
-    postForm(`/workflow-vault/entries/${encodeURIComponent(entryId)}/metadata`, formData),
+  createEntry: (formData, options) => postForm("/workflow-vault/entries", formData, options),
+  updateEntryMetadata: (entryId, formData, options) =>
+    postForm(`/workflow-vault/entries/${encodeURIComponent(entryId)}/metadata`, formData, options),
   archiveEntry: (entryId, body) =>
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/archive`, body),
   deleteEntry: (entryId) =>
@@ -70,10 +112,10 @@ export const VaultAPI = {
   getVersionWorkflow: (entryId, versionId) =>
     getJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/versions/${encodeURIComponent(versionId)}/workflow`),
 
-  createExample: (entryId, formData) =>
-    postForm(`/workflow-vault/entries/${encodeURIComponent(entryId)}/examples`, formData),
-  updateExample: (entryId, exampleId, formData) =>
-    postForm(`/workflow-vault/entries/${encodeURIComponent(entryId)}/examples/${encodeURIComponent(exampleId)}`, formData),
+  createExample: (entryId, formData, options) =>
+    postForm(`/workflow-vault/entries/${encodeURIComponent(entryId)}/examples`, formData, options),
+  updateExample: (entryId, exampleId, formData, options) =>
+    postForm(`/workflow-vault/entries/${encodeURIComponent(entryId)}/examples/${encodeURIComponent(exampleId)}`, formData, options),
   deleteExample: (entryId, exampleId) =>
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/examples/${encodeURIComponent(exampleId)}/delete`, {}),
   reorderExamples: (entryId, order) =>

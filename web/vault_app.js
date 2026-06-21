@@ -3,7 +3,7 @@
 // controller.render() and call back into controller methods for navigation.
 
 import { VaultAPI } from "./vault_api.js";
-import { el, clear, confirmDialog, showToast, applyAccentColor } from "./vault_dom.js";
+import { el, clear, confirmDialog, saveDiscardCancelDialog, showToast, applyAccentColor } from "./vault_dom.js";
 import { renderLoading, renderInitView, renderTopbar, renderGridBody } from "./vault_modal.js";
 import { renderDetailView } from "./vault_detail.js";
 import { renderWizard } from "./vault_wizard.js";
@@ -19,6 +19,9 @@ export class VaultApp {
     this.settingsSection = "info"; // sub-section within the Settings tab
     this.filters = { search: "", folderId: undefined, status: null, favoritesOnly: false, showArchived: undefined, generationType: null };
     this.isDirty = false;
+    this.dirtySaveHandler = null;
+    this.dirtyDiscardHandler = null;
+    this.dirtyDialogOptions = null;
     this.wizardOptions = null;
     this._onKeyDown = this._onKeyDown.bind(this);
   }
@@ -66,6 +69,9 @@ export class VaultApp {
     this.selectedTab = "overview";
     this.settingsSection = "info";
     this.isDirty = false;
+    this.dirtySaveHandler = null;
+    this.dirtyDiscardHandler = null;
+    this.dirtyDialogOptions = null;
     this.wizardOptions = null;
   }
 
@@ -104,18 +110,65 @@ export class VaultApp {
 
   async checkDirty() {
     if (!this.isDirty) return true;
+    const clearDirtyState = () => {
+      this.isDirty = false;
+      this.dirtySaveHandler = null;
+      this.dirtyDiscardHandler = null;
+      this.dirtyDialogOptions = null;
+    };
+    if (this.dirtySaveHandler) {
+      const dialog = this.dirtyDialogOptions || {};
+      const choice = await saveDiscardCancelDialog({
+        title: dialog.title || "Save changes before leaving?",
+        message: dialog.message || "You have unsaved changes.",
+        saveText: dialog.saveText || "Save",
+        discardText: dialog.discardText || "Discard",
+      });
+      if (choice === "cancel") return false;
+      if (choice === "discard") {
+        this.dirtyDiscardHandler?.();
+        clearDirtyState();
+        return true;
+      }
+      try {
+        const saved = await this.dirtySaveHandler();
+        if (saved === false) return false;
+        clearDirtyState();
+        return true;
+      } catch (e) {
+        showToast(e.message, "error");
+        return false;
+      }
+    }
     const ok = await confirmDialog({
       title: "Discard unsaved changes?",
       message: "You have unsaved changes that will be lost if you continue.",
       confirmText: "Discard changes",
       danger: true,
     });
-    if (ok) this.isDirty = false;
+    if (ok) {
+      this.dirtyDiscardHandler?.();
+      clearDirtyState();
+    }
     return ok;
   }
 
-  setDirty(value) {
+  setDirty(value, options = {}) {
     this.isDirty = value;
+    if (options.saveHandler !== undefined) {
+      this.dirtySaveHandler = options.saveHandler;
+    }
+    if (options.discardHandler !== undefined) {
+      this.dirtyDiscardHandler = options.discardHandler;
+    }
+    if (options.dialog !== undefined) {
+      this.dirtyDialogOptions = options.dialog;
+    }
+    if (!value) {
+      this.dirtySaveHandler = null;
+      this.dirtyDiscardHandler = null;
+      this.dirtyDialogOptions = null;
+    }
   }
 
   async setView(view) {

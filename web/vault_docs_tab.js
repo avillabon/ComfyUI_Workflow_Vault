@@ -20,12 +20,40 @@ export function renderDocsTab(controller, entry) {
     }
   };
 
+  let saveBtn = null;
+  const saveNotes = async () => {
+    if (saveBtn) saveBtn.disabled = true;
+    try {
+      const formData = new FormData();
+      formData.append("data", JSON.stringify({ notes: editor.getNotes() }));
+      await VaultAPI.updateEntryMetadata(entry.id, formData);
+      controller.setDirty(false);
+      await controller.refresh();
+      showToast("Notes saved.", "success");
+      return true;
+    } catch (err) {
+      showToast(err.message, "error");
+      return false;
+    } finally {
+      if (saveBtn) saveBtn.disabled = false;
+    }
+  };
+  const markDirty = () => {
+    controller.setDirty(true, {
+      saveHandler: saveNotes,
+      discardHandler: () => controller.render(),
+      dialog: {
+        title: "Save notes before leaving?",
+        message: "You have unsaved note changes.",
+        saveText: "Save notes",
+        discardText: "Discard",
+      },
+    });
+    updateStatus();
+  };
   const editor = renderNotesEditor({
     notes: entry.notes,
-    onChange: () => {
-      controller.setDirty(true);
-      updateStatus();
-    },
+    onChange: markDirty,
   });
   wrap.appendChild(editor);
 
@@ -35,25 +63,11 @@ export function renderDocsTab(controller, entry) {
   actions.appendChild(
     el("button", { className: "wv-btn", onclick: () => { controller.setDirty(false); controller.render(); } }, ["Discard changes"])
   );
-  const saveBtn = el(
+  saveBtn = el(
     "button",
     {
       className: "wv-btn wv-btn-primary",
-      onclick: async () => {
-        saveBtn.disabled = true;
-        try {
-          const formData = new FormData();
-          formData.append("data", JSON.stringify({ notes: editor.getNotes() }));
-          await VaultAPI.updateEntryMetadata(entry.id, formData);
-          controller.setDirty(false);
-          await controller.refresh();
-          showToast("Notes saved.", "success");
-        } catch (err) {
-          showToast(err.message, "error");
-        } finally {
-          saveBtn.disabled = false;
-        }
-      },
+      onclick: saveNotes,
     },
     [el("i", { className: "pi pi-save" }), "Save notes"]
   );

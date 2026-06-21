@@ -5,7 +5,6 @@
   "version_id": "version_BB22CC33DD44EE55FF66",
   "primary_type": "image",
   "notes": "Left: a noisy scanned input. Right: the cleaned-up result from this workflow.",
-  "workflow_snapshot": "workflow.snapshot.json",
   "inputs": [
     {
       "id": "media_01020304050607080910",

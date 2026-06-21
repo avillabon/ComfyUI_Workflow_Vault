@@ -107,11 +107,13 @@ def create_entry(vault_root, data):
 
     base_slug = utils.slugify(name)
     slug = utils.unique_slug(base_slug, slugs)
+    staging_slug = f"{storage.staging_entry_prefix()}{slug}_{utils.generate_id('stage')}"
 
-    edir = storage.entry_dir(vault_root, slug)
-    os.makedirs(storage.thumbnails_dir(vault_root, slug), exist_ok=True)
-    os.makedirs(storage.versions_dir(vault_root, slug), exist_ok=True)
-    os.makedirs(storage.examples_dir(vault_root, slug), exist_ok=True)
+    final_dir = storage.entry_dir(vault_root, slug)
+    staging_dir = storage.entry_dir(vault_root, staging_slug)
+    os.makedirs(storage.thumbnails_dir(vault_root, staging_slug), exist_ok=True)
+    os.makedirs(storage.versions_dir(vault_root, staging_slug), exist_ok=True)
+    os.makedirs(storage.examples_dir(vault_root, staging_slug), exist_ok=True)
 
     now = utils.now_iso()
     manifest = {
@@ -135,78 +137,90 @@ def create_entry(vault_root, data):
         "updated_at": now,
     }
 
-    notes = normalize_notes(data.get("notes"))
-    if notes:
-        storage.write_notes(vault_root, slug, notes)
+    try:
+        notes = normalize_notes(data.get("notes"))
+        if notes:
+            storage.write_notes(vault_root, staging_slug, notes)
 
-    version, err = versions.create_version(
-        vault_root, manifest, slug, workflow,
-        label=data.get("version_label") or "v001",
-        custom_label=data.get("custom_label"),
-        notes=data.get("version_notes", ""),
-        make_current=True,
-    )
-    if err:
-        shutil.rmtree(edir, ignore_errors=True)
-        return None, err
-
-    thumbnail = data.get("thumbnail")
-    if thumbnail:
-        rel, merr = media_mod.save_thumbnail(vault_root, slug, thumbnail["bytes"], thumbnail["filename"], mtime=thumbnail.get("mtime"))
-        if merr:
-            shutil.rmtree(edir, ignore_errors=True)
-            return None, merr
-        manifest["thumbnail"] = rel
-
-    # Archival full-resolution original is best-effort: a failure here must not
-    # discard the whole entry, since the display thumbnail already succeeded.
-    thumbnail_source = data.get("thumbnail_source")
-    if thumbnail_source:
-        rel, src_compressed, merr = media_mod.save_thumbnail_source(
-            vault_root, slug, thumbnail_source["bytes"], thumbnail_source["filename"],
-            mtime=thumbnail_source.get("mtime"), compress=_should_compress_source(vault_root)
+        version, err = versions.create_version(
+            vault_root, manifest, staging_slug, workflow,
+            label=data.get("version_label") or "v001",
+            custom_label=data.get("custom_label"),
+            notes=data.get("version_notes", ""),
+            make_current=True,
         )
-        if not merr:
-            manifest["thumbnail_source"] = rel
-            manifest["thumbnail_source_compressed"] = src_compressed
+        if err:
+            shutil.rmtree(staging_dir, ignore_errors=True)
+            return None, err
 
-    # Compare overlay is best-effort too — never discard the entry over it.
-    compare_image = data.get("compare_image")
-    if compare_image:
-        rel, merr = media_mod.save_compare_image(
-            vault_root, slug, compare_image["bytes"], compare_image["filename"], mtime=compare_image.get("mtime")
-        )
-        if not merr:
-            manifest["compare_image"] = rel
-        compare_image_source = data.get("compare_image_source")
-        if not merr and compare_image_source:
-            srel, serr = media_mod.save_compare_image_source(
-                vault_root, slug, compare_image_source["bytes"], compare_image_source["filename"],
-                mtime=compare_image_source.get("mtime"),
+        thumbnail = data.get("thumbnail")
+        if thumbnail:
+            rel, merr = media_mod.save_thumbnail(
+                vault_root, staging_slug, thumbnail["bytes"], thumbnail["filename"], mtime=thumbnail.get("mtime")
             )
-            if not serr:
-                manifest["compare_image_source"] = srel
+            if merr:
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                return None, merr
+            manifest["thumbnail"] = rel
 
-    storage.write_manifest(vault_root, slug, manifest)
+        # Archival full-resolution original is best-effort: a failure here must
+        # not discard the whole entry, since the display thumbnail already
+        # succeeded.
+        thumbnail_source = data.get("thumbnail_source")
+        if thumbnail_source:
+            rel, src_compressed, merr = media_mod.save_thumbnail_source(
+                vault_root, staging_slug, thumbnail_source["bytes"], thumbnail_source["filename"],
+                mtime=thumbnail_source.get("mtime"), compress=_should_compress_source(vault_root)
+            )
+            if not merr:
+                manifest["thumbnail_source"] = rel
+                manifest["thumbnail_source_compressed"] = src_compressed
+
+        # Compare overlay is best-effort too — never discard the entry over it.
+        compare_image = data.get("compare_image")
+        if compare_image:
+            rel, merr = media_mod.save_compare_image(
+                vault_root, staging_slug, compare_image["bytes"], compare_image["filename"], mtime=compare_image.get("mtime")
+            )
+            if not merr:
+                manifest["compare_image"] = rel
+            compare_image_source = data.get("compare_image_source")
+            if not merr and compare_image_source:
+                srel, serr = media_mod.save_compare_image_source(
+                    vault_root, staging_slug, compare_image_source["bytes"], compare_image_source["filename"],
+                    mtime=compare_image_source.get("mtime"),
+                )
+                if not serr:
+                    manifest["compare_image_source"] = srel
+
+        skipped_files = []
+        examples_data = data.get("examples") or []
+        if examples_data:
+            for example_data in examples_data:
+                input_files = example_data.pop("input_files", [])
+                output_files = example_data.pop("output_files", [])
+                if not input_files and not output_files:
+                    continue
+                _, eerr, skipped = examples_mod.create_example(
+                    vault_root, manifest, staging_slug, example_data, input_files, output_files
+                )
+                if eerr is None:
+                    skipped_files.extend(skipped)
+
+        storage.write_manifest(vault_root, staging_slug, manifest)
+        if os.path.exists(final_dir):
+            shutil.rmtree(staging_dir, ignore_errors=True)
+            return None, "A folder for this slug already exists on disk."
+        os.rename(staging_dir, final_dir)
+    except Exception as e:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        return None, f"Could not create entry: {e}"
 
     if manifest["folder_id"]:
         ok, ferr = folders_mod.add_entry_to_folder(vault_root, manifest["folder_id"], manifest["id"])
         if not ok:
             manifest["folder_id"] = None
             storage.write_manifest(vault_root, slug, manifest)
-
-    skipped_files = []
-    examples_data = data.get("examples") or []
-    if examples_data:
-        for example_data in examples_data:
-            input_files = example_data.pop("input_files", [])
-            output_files = example_data.pop("output_files", [])
-            if not input_files and not output_files:
-                continue
-            _, eerr, skipped = examples_mod.create_example(vault_root, manifest, slug, example_data, input_files, output_files)
-            if eerr is None:
-                skipped_files.extend(skipped)
-        storage.write_manifest(vault_root, slug, manifest)
 
     entry_state = storage.build_entry_state(vault_root, slug)
     if skipped_files:

@@ -1,0 +1,9 @@
+{
+  "notes": [
+    {
+      "id": "note_3C4D5E6F7A8B9C0D1E2F",
+      "title": "Notes",
+      "content": "## Working notes\n\n- Replace the checkpoint and sampler settings with whatever your installed video nodes expect once you build out the full pipeline.\n"
+    }
+  ]
+}

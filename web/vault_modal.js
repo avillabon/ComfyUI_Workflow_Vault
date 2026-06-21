@@ -8,7 +8,7 @@ import { renderFolderTree, folderPath } from "./vault_folders.js";
 import { buildCompareSlider } from "./vault_compare_slider.js";
 
 // Bump this on each edit to the current date (CalVer); shown in the footer.
-export const VAULT_VERSION = "2026.06.20";
+export const VAULT_VERSION = "2026.06.21";
 export const AUTHOR_NAME = "Alex Villabón";
 export const AUTHOR_URL = "https://www.youtube.com/@alexvillabon";
 export const REPO_URL = "https://github.com/avillabon/ComfyUI_Workflow_Vault";
@@ -126,7 +126,9 @@ export function renderInitView(controller) {
   actions.appendChild(initBtn);
 
   if (controller.state?.extension_dir) {
-    const samplePath = `${controller.state.extension_dir}\\sample_vault`;
+    const extensionDir = String(controller.state.extension_dir).replace(/[\\/]+$/, "");
+    const sep = extensionDir.includes("\\") ? "\\" : "/";
+    const samplePath = `${extensionDir}${sep}sample_vault`;
     actions.appendChild(
       el(
         "button",

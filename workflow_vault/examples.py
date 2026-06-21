@@ -1,7 +1,6 @@
 """Reference-only examples: input/output media for an entry."""
 
 import os
-import shutil
 
 from . import config, media, storage, utils
 
@@ -102,6 +101,17 @@ def _find_example(vault_root, slug, example_id):
     return None
 
 
+def _send_to_trash_best_effort(path, allowed_root):
+    path = os.path.normpath(path)
+    allowed_root = os.path.normpath(allowed_root)
+    if not utils.is_path_inside(allowed_root, path) or not os.path.exists(path):
+        return None
+    try:
+        return utils.send_to_trash(path)
+    except OSError:
+        return None
+
+
 def _apply_media_layout(edir, example, new_inputs, new_outputs):
     """Reconcile the example's inputs/outputs to the given ordered specs.
 
@@ -146,10 +156,7 @@ def _apply_media_layout(edir, example, new_inputs, new_outputs):
         if iid not in kept:
             fpath = os.path.join(edir, item["file"])
             if os.path.isfile(fpath):
-                try:
-                    os.remove(fpath)
-                except OSError:
-                    pass
+                _send_to_trash_best_effort(fpath, edir)
 
     example["inputs"] = inputs
     example["outputs"] = outputs
@@ -219,7 +226,13 @@ def delete_example(vault_root, manifest, slug, example_id):
     if not example:
         return False, "Example not found."
     edir = storage.example_dir(vault_root, slug, example["dir"])
-    shutil.rmtree(edir, ignore_errors=True)
+    examples_root = storage.examples_dir(vault_root, slug)
+    if not utils.is_path_inside(examples_root, edir) or not os.path.isdir(edir):
+        return False, "Example folder not found."
+    try:
+        utils.send_to_trash(edir)
+    except OSError as e:
+        return False, f"Could not delete example: {e}"
     manifest["updated_at"] = utils.now_iso()
     return True, None
 

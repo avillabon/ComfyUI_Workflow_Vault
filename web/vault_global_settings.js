@@ -56,11 +56,7 @@ export function renderGlobalSettings(controller) {
         className: "wv-icon-btn wv-icon-btn-lg",
         title: "Back to vault",
         "aria-label": "Back to vault",
-        onclick: () => {
-          // Revert any unsaved accent-color preview to the persisted value.
-          applyAccentColor(state.settings?.accent_color);
-          controller.setView("grid");
-        },
+        onclick: () => controller.setView("grid"),
       },
       [el("i", { className: "pi pi-arrow-left" })]
     )
@@ -70,6 +66,46 @@ export function renderGlobalSettings(controller) {
   // Save lives in the header so it stays reachable no matter how far the
   // (now two-column) settings body is scrolled. Its handler reads the control
   // values below at click time, so the forward references are safe.
+  const collectSettingsPayload = () => {
+    const payload = {
+      show_archived: showArchivedSwitch.input.checked,
+      default_thumbnail_behavior: thumbBehaviorSelect.value,
+      accent_color: selectedAccent,
+      card_fields: Object.fromEntries(CARD_FIELD_DEFS.map(([k]) => [k, cardSwitches[k].input.checked])),
+      compress_examples_on_upload: compressSwitch.input.checked,
+      example_compress_format: compressFormat,
+      compress_thumbnail_source: sourceSwitch.input.checked,
+    };
+    const nextRoot = (locationInput.value || "").trim();
+    if (nextRoot && nextRoot !== (state.vault_root || "")) payload.vault_root = nextRoot;
+    return payload;
+  };
+  const saveSettings = async () => {
+    const payload = collectSettingsPayload();
+    try {
+      await VaultAPI.postSettings(payload);
+    } catch (e) {
+      if (!(e.status === 409 && e.data?.needs_confirmation && payload.vault_root)) throw e;
+      const ok = await confirmDialog({ title: "Change Vault Location?", message: e.data.message, confirmText: "Continue" });
+      if (!ok) return false;
+      await VaultAPI.postSettings({ ...payload, confirm: true });
+    }
+    controller.filters.showArchived = showArchivedSwitch.input.checked;
+    controller.setDirty(false);
+    await controller.refresh();
+    showToast("Settings saved.", "success");
+    return true;
+  };
+  const markDirty = () => controller.setDirty(true, {
+    saveHandler: saveSettings,
+    discardHandler: () => applyAccentColor(state.settings?.accent_color),
+    dialog: {
+      title: "Save settings before leaving?",
+      message: "You have unsaved settings changes.",
+      saveText: "Save settings",
+      discardText: "Discard",
+    },
+  });
   const saveBtn = el(
     "button",
     {
@@ -77,18 +113,7 @@ export function renderGlobalSettings(controller) {
       onclick: async () => {
         saveBtn.disabled = true;
         try {
-          await VaultAPI.postSettings({
-            show_archived: showArchivedSwitch.input.checked,
-            default_thumbnail_behavior: thumbBehaviorSelect.value,
-            accent_color: selectedAccent,
-            card_fields: Object.fromEntries(CARD_FIELD_DEFS.map(([k]) => [k, cardSwitches[k].input.checked])),
-            compress_examples_on_upload: compressSwitch.input.checked,
-            example_compress_format: compressFormat,
-            compress_thumbnail_source: sourceSwitch.input.checked,
-          });
-          controller.filters.showArchived = showArchivedSwitch.input.checked;
-          await controller.refresh();
-          showToast("Settings saved.", "success");
+          await saveSettings();
         } catch (e) {
           showToast(e.message, "error");
         } finally {
@@ -109,8 +134,8 @@ export function renderGlobalSettings(controller) {
   // spilled panels outside the modal at narrow widths).
   const SETTINGS_TABS = [
     { id: "general", label: "General" },
+    { id: "organize", label: "Organization" },
     { id: "storage", label: "Storage" },
-    { id: "organize", label: "Organize" },
   ];
   const sections = {
     general: el("div", { className: "wv-settings-section" }),
@@ -129,7 +154,20 @@ export function renderGlobalSettings(controller) {
     }
   };
   for (const t of SETTINGS_TABS) {
-    const btn = el("button", { className: "wv-tab", onclick: () => showTab(t.id) }, [t.label]);
+    const btn = el(
+      "button",
+      {
+        className: "wv-tab",
+        onclick: async () => {
+          if (controller.settingsSection === t.id) return;
+          const proceed = await controller.checkDirty();
+          if (!proceed) return;
+          controller.settingsSection = t.id;
+          controller.render();
+        },
+      },
+      [t.label]
+    );
     tabButtons[t.id] = btn;
     tabBar.appendChild(btn);
   }
@@ -155,7 +193,10 @@ export function renderGlobalSettings(controller) {
         locationBrowseBtn.disabled = true;
         try {
           const res = await VaultAPI.browseFolder();
-          if (res.path) locationInput.value = res.path;
+          if (res.path) {
+            locationInput.value = res.path;
+            markDirty();
+          }
         } catch {
           // silently ignore
         } finally {
@@ -166,6 +207,8 @@ export function renderGlobalSettings(controller) {
     [el("i", { className: "pi pi-folder-open" }), " Browse…"]
   );
   const changeBtn = el("button", { className: "wv-btn", onclick: () => changeVaultRoot(locationInput.value, false) }, ["Change…"]);
+  locationInput.addEventListener("input", markDirty);
+  locationInput.addEventListener("change", markDirty);
 
   async function changeVaultRoot(path, confirm) {
     const trimmed = (path || "").trim();
@@ -177,6 +220,7 @@ export function renderGlobalSettings(controller) {
     locationStatus.textContent = "";
     try {
       await VaultAPI.postSettings({ vault_root: trimmed, confirm });
+      controller.setDirty(false);
       await controller.refresh();
       showToast("Vault location updated.", "success");
     } catch (e) {
@@ -207,6 +251,8 @@ export function renderGlobalSettings(controller) {
       { value: "blank", label: "Leave blank" },
     ].map((o) => el("option", { value: o.value, selected: state.settings?.default_thumbnail_behavior === o.value }, [o.label]))
   );
+  showArchivedSwitch.input.addEventListener("change", markDirty);
+  thumbBehaviorSelect.addEventListener("change", markDirty);
 
   const defPanel = panel("Defaults", "pi pi-sliders-h", null);
   defPanel.appendChild(settingRow("Show archived entries by default", showArchivedSwitch));
@@ -224,6 +270,7 @@ export function renderGlobalSettings(controller) {
   for (const [key, label] of CARD_FIELD_DEFS) {
     const sw = switchEl(cardFields[key] !== false);
     cardSwitches[key] = sw;
+    sw.input.addEventListener("change", markDirty);
     cardPanel.appendChild(settingRow(label, sw));
   }
   sections.general.appendChild(cardPanel);
@@ -252,6 +299,7 @@ export function renderGlobalSettings(controller) {
         onclick: () => {
           selectedAccent = c;
           syncAccent();
+          markDirty();
         },
       })
     );
@@ -259,6 +307,7 @@ export function renderGlobalSettings(controller) {
   colorInput.addEventListener("input", () => {
     selectedAccent = colorInput.value;
     syncAccent();
+    markDirty();
   });
 
   const accentPanel = panel("Appearance", "pi pi-palette", "Accent color used for icons, the logo, and highlights throughout the vault.");
@@ -277,6 +326,7 @@ export function renderGlobalSettings(controller) {
   // Thumbnail source compression (always WebP — keeps the embedded workflow).
   const sourceSwitch = switchEl(state.settings?.compress_thumbnail_source !== false && pillowOk);
   sourceSwitch.input.disabled = !pillowOk;
+  sourceSwitch.input.addEventListener("change", markDirty);
 
   const formatRow = el("div", { className: "wv-vs-format" });
   const FORMATS = [
@@ -292,6 +342,7 @@ export function renderGlobalSettings(controller) {
       checked: compressFormat === value,
       onchange: () => {
         if (radio.checked) compressFormat = value;
+        markDirty();
       },
     });
     formatRow.appendChild(
@@ -308,7 +359,10 @@ export function renderGlobalSettings(controller) {
   function syncCompressUi() {
     formatRow.style.display = compressSwitch.input.checked ? "" : "none";
   }
-  compressSwitch.input.addEventListener("change", syncCompressUi);
+  compressSwitch.input.addEventListener("change", () => {
+    syncCompressUi();
+    markDirty();
+  });
 
   const storagePanel = panel(
     "Storage",
@@ -464,15 +518,127 @@ export function renderGlobalSettings(controller) {
   }
   sections.organize.appendChild(foldersPanel);
 
-  // Assemble: tab bar + the three sections; show the remembered (or first) tab.
+  // --- Health / recovery ---
+  sections.storage.appendChild(renderHealthPanel(controller));
+
+  // Assemble: tab bar + sections; show the remembered (or first) tab.
   body.appendChild(tabBar);
   body.appendChild(sections.general);
-  body.appendChild(sections.storage);
   body.appendChild(sections.organize);
+  body.appendChild(sections.storage);
   showTab(SETTINGS_TABS.some((t) => t.id === controller.settingsSection) ? controller.settingsSection : "general");
 
   wrap.appendChild(body);
   return wrap;
+}
+
+function renderHealthPanel(controller) {
+  const healthPanel = panel(
+    "Vault health",
+    "pi pi-heart",
+    "Checks for interrupted saves, missing referenced files, and stale folder references. Checking is read-only."
+  );
+  const summary = el("div", { className: "wv-health-summary" }, [el("div", { className: "wv-muted" }, ["Run a check to inspect this vault."])]);
+  const issueList = el("div", { className: "wv-health-issues" });
+  const actions = el("div", { className: "wv-vs-batch-row" });
+  const status = el("span", { className: "wv-vs-footer-status" });
+  const checkBtn = el("button", { className: "wv-btn wv-btn-primary" }, [el("i", { className: "pi pi-search" }), "Check vault"]);
+  const cleanupBtn = el("button", { className: "wv-btn", disabled: true }, [el("i", { className: "pi pi-trash" }), "Clean interrupted saves"]);
+
+  function renderReport(report) {
+    const s = report?.summary || {};
+    summary.replaceChildren(
+      el("div", { className: `wv-health-state${report?.ok ? " wv-health-state-ok" : ""}` }, [
+        el("i", { className: report?.ok ? "pi pi-check-circle" : "pi pi-exclamation-triangle" }),
+        report?.ok ? "No issues found." : `${(report?.issues || []).length} issue${(report?.issues || []).length === 1 ? "" : "s"} found.`,
+      ]),
+      el("div", { className: "wv-vs-stats wv-health-stats" }, [
+        statTile("Entries", s.entries || 0),
+        statTile("Versions", s.versions || 0),
+        statTile("Examples", s.examples || 0),
+        statTile("Missing files", s.missing_files || 0),
+      ])
+    );
+    cleanupBtn.disabled = !(s.staging_entries > 0);
+    issueList.replaceChildren();
+    for (const issue of report?.issues || []) {
+      issueList.appendChild(
+        el("div", { className: `wv-health-issue wv-health-${issue.severity || "warning"}` }, [
+          el("i", { className: issue.severity === "error" ? "pi pi-times-circle" : "pi pi-exclamation-circle" }),
+          el("div", { className: "wv-health-issue-body" }, [
+            el("div", { className: "wv-health-issue-title" }, [issueTitle(issue)]),
+            el("div", { className: "wv-health-issue-meta" }, [issue.message || issue.type || "Vault issue"]),
+            ...(issue.path ? [el("div", { className: "wv-mono wv-health-path" }, [issue.path])] : []),
+          ]),
+        ])
+      );
+    }
+  }
+
+  async function runCheck() {
+    checkBtn.disabled = true;
+    status.textContent = "Checking…";
+    try {
+      renderReport(await VaultAPI.getHealth());
+      status.textContent = "";
+    } catch (e) {
+      status.textContent = e.message;
+    } finally {
+      checkBtn.disabled = false;
+    }
+  }
+
+  checkBtn.onclick = runCheck;
+  cleanupBtn.onclick = async () => {
+    const ok = await confirmDialog({
+      title: "Clean interrupted saves?",
+      message: "Staging folders from interrupted entry saves will be moved to your system Trash/Recycle Bin where supported. Complete entries are not touched.",
+      confirmText: "Clean up",
+      danger: true,
+    });
+    if (!ok) return;
+    cleanupBtn.disabled = true;
+    status.textContent = "Cleaning…";
+    try {
+      const res = await VaultAPI.cleanupStaging();
+      renderReport(res.health);
+      const moved = res.removed?.length || 0;
+      showToast(`Cleaned ${moved} interrupted save${moved === 1 ? "" : "s"}.`, "success");
+      await controller.refresh();
+    } catch (e) {
+      status.textContent = e.message;
+    }
+  };
+
+  actions.appendChild(el("div", { className: "wv-vs-batch-text" }, [
+    el("div", {}, ["Inspect and recover"]),
+    el("div", { className: "wv-radio-desc" }, ["Use cleanup only for .wv_staging_* folders left by interrupted saves."]),
+  ]));
+  actions.appendChild(el("div", { className: "wv-vs-batch-action" }, [status, checkBtn, cleanupBtn]));
+  healthPanel.appendChild(summary);
+  healthPanel.appendChild(issueList);
+  healthPanel.appendChild(actions);
+  return healthPanel;
+}
+
+function statTile(label, value) {
+  return el("div", { className: "wv-vs-stat" }, [
+    el("div", { className: "wv-vs-stat-label" }, [label]),
+    el("div", { className: "wv-vs-stat-value" }, [String(value)]),
+  ]);
+}
+
+function issueTitle(issue) {
+  const names = {
+    staging_entry: "Interrupted save",
+    orphan_entry_dir: "Orphan entry folder",
+    missing_folder: "Missing folder",
+    missing_media: "Missing media",
+    missing_workflow: "Missing workflow",
+    missing_example_media: "Missing example media",
+    stale_folder_entry: "Stale folder entry",
+  };
+  return names[issue?.type] || "Vault issue";
 }
 
 // Fills the footprint panel once sizes come back from the backend: a stacked

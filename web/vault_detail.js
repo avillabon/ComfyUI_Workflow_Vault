@@ -1,7 +1,7 @@
 // Entry detail view: header, tab router, plus the Overview and Settings
 // tabs (the others live in their own modules to keep files manageable).
 
-import { el, clear, formatDate, showToast, confirmDialog, promptDialog, openImageLightbox, toggleField } from "./vault_dom.js";
+import { el, clear, formatDate, showToast, confirmDialog, promptDialog, openImageLightbox, toggleField, createProgressStatus } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
 import { STATUS_LABELS, STATUS_ORDER, renderGenTypePicker, GENERATION_TYPE_MAP } from "./vault_modal.js";
 import { renderFolderSelect } from "./vault_folders.js";
@@ -253,9 +253,9 @@ function renderEntryMetadataForm(controller, entry) {
     statusSelect.appendChild(el("option", { value: "archived", selected: true }, [STATUS_LABELS.archived]));
   }
 
-  const genTypePicker = renderGenTypePicker(entry.generation_types || [], () => controller.setDirty(true));
+  const genTypePicker = renderGenTypePicker(entry.generation_types || [], markDirty);
 
-  const favSwitch = toggleField("Favorite", !!entry.favorite, () => controller.setDirty(true));
+  const favSwitch = toggleField("Favorite", !!entry.favorite, markDirty);
 
   controller.state.folders = controller.state.folders || [];
   const folderSelect = renderFolderSelect({ folders: controller.state.folders, selectedId: entry.folder_id || "" });
@@ -269,7 +269,18 @@ function renderEntryMetadataForm(controller, entry) {
     noun: "compare image",
   });
 
-  const markDirty = () => controller.setDirty(true);
+  function markDirty() {
+    controller.setDirty(true, {
+      saveHandler: saveEntryMetadata,
+      discardHandler: () => controller.render(),
+      dialog: {
+        title: "Save workflow details before leaving?",
+        message: "You have unsaved workflow detail changes.",
+        saveText: "Save changes",
+        discardText: "Discard",
+      },
+    });
+  }
   for (const input of [nameInput, descInput, statusSelect, folderSelect, thumbField.fileInput, compareField.fileInput]) {
     input.addEventListener("input", markDirty);
     input.addEventListener("change", markDirty);
@@ -297,63 +308,72 @@ function renderEntryMetadataForm(controller, entry) {
   wrap.appendChild(grid);
 
   const actions = el("div", { className: "wv-settings-actions" });
-  const saveBtn = el(
+  const progress = createProgressStatus();
+  let saveBtn = null;
+  async function saveEntryMetadata() {
+    const name = nameInput.value.trim();
+    if (!name) {
+      showToast("Name is required.", "error");
+      nameInput.focus?.();
+      return false;
+    }
+    if (saveBtn) saveBtn.disabled = true;
+    progress.reset();
+    try {
+      const formData = new FormData();
+      const data = {
+        name,
+        description: descInput.value,
+        tags: tagInput.getTags(),
+        status: statusSelect.value,
+        generation_types: genTypePicker.getSelected(),
+        favorite: favSwitch.input.checked,
+        folder_id: folderSelect.value === "__new__" ? null : folderSelect.value || null,
+      };
+      // Display thumbnail + untouched original (archival), both stamped
+      // with the source date. For a video the picker yields an animated
+      // WebP (converted server-side) or a still frame; for an image, a
+      // downscaled cover. See renderThumbnailField().getUpload().
+      const up = await thumbField.getUpload();
+      if (up?.file) {
+        formData.append("thumbnail", up.file);
+        if (up.source) formData.append("thumbnail_source", up.source);
+        data.file_mtimes = { thumbnail: up.mtime, thumbnail_source: up.mtime };
+      }
+      // Optional before/after compare overlay (same image/video picker): a
+      // new asset, or an explicit removal (clear) of an existing one.
+      const cmp = await compareField.getUpload();
+      if (cmp?.file) {
+        formData.append("compare_image", cmp.file);
+        if (cmp.source) formData.append("compare_image_source", cmp.source);
+        data.file_mtimes = { ...(data.file_mtimes || {}), compare_image: cmp.mtime, compare_image_source: cmp.mtime };
+      } else if (cmp?.clear) {
+        data.compare_image_clear = true;
+      }
+      formData.append("data", JSON.stringify(data));
+      await VaultAPI.updateEntryMetadata(entry.id, formData, { onProgress: (event) => progress.update(event) });
+      controller.setDirty(false);
+      await controller.refresh();
+      showToast("Entry updated.", "success");
+      return true;
+    } catch (e) {
+      showToast(e.message, "error");
+      return false;
+    } finally {
+      if (saveBtn) saveBtn.disabled = false;
+      progress.reset();
+    }
+  }
+  saveBtn = el(
     "button",
     {
       className: "wv-btn wv-btn-primary",
-      onclick: async () => {
-        const name = nameInput.value.trim();
-        if (!name) {
-          showToast("Name is required.", "error");
-          return;
-        }
-        saveBtn.disabled = true;
-        try {
-          const formData = new FormData();
-          const data = {
-            name,
-            description: descInput.value,
-            tags: tagInput.getTags(),
-            status: statusSelect.value,
-            generation_types: genTypePicker.getSelected(),
-            favorite: favSwitch.input.checked,
-            folder_id: folderSelect.value === "__new__" ? null : folderSelect.value || null,
-          };
-          // Display thumbnail + untouched original (archival), both stamped
-          // with the source date. For a video the picker yields an animated
-          // WebP (converted server-side) or a still frame; for an image, a
-          // downscaled cover. See renderThumbnailField().getUpload().
-          const up = await thumbField.getUpload();
-          if (up?.file) {
-            formData.append("thumbnail", up.file);
-            if (up.source) formData.append("thumbnail_source", up.source);
-            data.file_mtimes = { thumbnail: up.mtime, thumbnail_source: up.mtime };
-          }
-          // Optional before/after compare overlay (same image/video picker): a
-          // new asset, or an explicit removal (clear) of an existing one.
-          const cmp = await compareField.getUpload();
-          if (cmp?.file) {
-            formData.append("compare_image", cmp.file);
-            if (cmp.source) formData.append("compare_image_source", cmp.source);
-            data.file_mtimes = { ...(data.file_mtimes || {}), compare_image: cmp.mtime, compare_image_source: cmp.mtime };
-          } else if (cmp?.clear) {
-            data.compare_image_clear = true;
-          }
-          formData.append("data", JSON.stringify(data));
-          await VaultAPI.updateEntryMetadata(entry.id, formData);
-          controller.setDirty(false);
-          await controller.refresh();
-          showToast("Entry updated.", "success");
-        } catch (e) {
-          showToast(e.message, "error");
-        } finally {
-          saveBtn.disabled = false;
-        }
-      },
+      onclick: saveEntryMetadata,
     },
     ["Save Changes"]
   );
   actions.appendChild(saveBtn);
+  actions.appendChild(progress.element);
 
   actions.appendChild(
     el(

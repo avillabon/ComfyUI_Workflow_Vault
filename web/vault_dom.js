@@ -104,6 +104,44 @@ export function showToast(message, severity = "info", life = 4000) {
   }, life);
 }
 
+export function createProgressStatus() {
+  const label = el("span", { className: "wv-progress-label" });
+  const fill = el("span", { className: "wv-progress-fill" });
+  const bar = el("span", { className: "wv-progress-bar", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100" }, [fill]);
+  const root = el("div", { className: "wv-progress", style: { display: "none" } }, [label, bar]);
+
+  function set(percent, text) {
+    root.style.display = "";
+    root.classList.remove("wv-progress-indeterminate");
+    const value = Math.max(0, Math.min(100, Number(percent) || 0));
+    fill.style.transform = `scaleX(${value / 100})`;
+    bar.setAttribute("aria-valuenow", String(Math.round(value)));
+    label.textContent = text;
+  }
+
+  return {
+    element: root,
+    update(event) {
+      if (event?.phase === "processing") {
+        root.style.display = "";
+        root.classList.add("wv-progress-indeterminate");
+        fill.style.transform = "scaleX(0.45)";
+        bar.removeAttribute("aria-valuenow");
+        label.textContent = "Processing media…";
+      } else {
+        set(event?.percent ?? 0, event?.phase === "starting" ? "Preparing upload…" : `Uploading… ${event?.percent ?? 0}%`);
+      }
+    },
+    reset() {
+      root.style.display = "none";
+      root.classList.remove("wv-progress-indeterminate");
+      fill.style.transform = "scaleX(0)";
+      label.textContent = "";
+      bar.removeAttribute("aria-valuenow");
+    },
+  };
+}
+
 /**
  * Shows a confirm dialog and resolves true/false depending on the user's
  * choice. Always resolves false if dismissed (Escape, backdrop click).
@@ -149,6 +187,44 @@ export function confirmDialog({ title = "Confirm", message = "", confirmText = "
     document.addEventListener("keydown", onKey);
     document.body.appendChild(overlay);
     confirmBtn.focus();
+  });
+}
+
+export function saveDiscardCancelDialog({ title = "Save changes?", message = "", saveText = "Save", discardText = "Discard changes" } = {}) {
+  return new Promise((resolve) => {
+    const overlay = el("div", { className: "wv-overlay wv-overlay-dialog" });
+    const body = el("div", { className: "wv-dialog-body" });
+    String(message).split("\n").forEach((line) => {
+      body.appendChild(el("p", {}, [line || " "]));
+    });
+
+    const cleanup = (result) => {
+      overlay.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") cleanup("cancel");
+    };
+
+    const saveBtn = el("button", { className: "wv-btn wv-btn-primary", onclick: () => cleanup("save") }, [saveText]);
+    const box = el("div", { className: "wv-dialog", role: "dialog", "aria-modal": "true", "aria-label": title }, [
+      el("div", { className: "wv-dialog-title" }, [title]),
+      body,
+      el("div", { className: "wv-dialog-footer" }, [
+        el("button", { className: "wv-btn", onclick: () => cleanup("cancel") }, ["Cancel"]),
+        el("button", { className: "wv-btn wv-btn-danger", onclick: () => cleanup("discard") }, [discardText]),
+        saveBtn,
+      ]),
+    ]);
+
+    overlay.appendChild(box);
+    overlay.addEventListener("mousedown", (e) => {
+      if (e.target === overlay) cleanup("cancel");
+    });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(overlay);
+    saveBtn.focus();
   });
 }
 

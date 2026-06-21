@@ -1,7 +1,7 @@
 // Examples tab: reference media (inputs/outputs) plus notes for each
 // example, with simple add/edit/reorder/delete management.
 
-import { el, clear, showToast, confirmDialog, promptDialog, formDialog } from "./vault_dom.js";
+import { el, clear, showToast, confirmDialog, promptDialog, formDialog, createProgressStatus } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
 import { renderMarkdown } from "./vault_markdown.js";
 import { renderMediaPicker } from "./vault_media_picker.js";
@@ -16,7 +16,7 @@ export function renderExamplesTab(controller, entry) {
     "button",
     {
       className: "wv-btn wv-section-action",
-      onclick: () => {
+      onclick: async () => {
         if (addFormContainer.style.display === "none") {
           clear(addFormContainer);
           addFormContainer.appendChild(
@@ -27,6 +27,9 @@ export function renderExamplesTab(controller, entry) {
           );
           addFormContainer.style.display = "";
         } else {
+          const proceed = await controller.checkDirty();
+          if (!proceed) return;
+          controller.setDirty(false);
           addFormContainer.style.display = "none";
           clear(addFormContainer);
         }
@@ -77,63 +80,87 @@ function formRow(label, input) {
 
 function renderAddExampleForm(controller, entry, onClose) {
   const form = el("div", { className: "wv-form wv-inline-form" });
+  const closeCleanly = () => {
+    controller.setDirty(false);
+    onClose();
+  };
+  const markDirty = () => controller.setDirty(true, {
+    saveHandler: () => saveExample({ closeAfterSave: false }),
+    discardHandler: onClose,
+    dialog: {
+      title: "Save example before leaving?",
+      message: "You have an unsaved example.",
+      saveText: "Create example",
+      discardText: "Discard",
+    },
+  });
 
   const titleInput = el("input", { className: "wv-input", type: "text", placeholder: "Title (optional)" });
   const notesInput = el("textarea", { className: "wv-input wv-textarea", placeholder: "Notes (optional, Markdown supported)" });
-  const picker = renderMediaPicker({ preview: true });
+  const picker = renderMediaPicker({ preview: true, onChange: markDirty });
+  titleInput.addEventListener("input", markDirty);
+  notesInput.addEventListener("input", markDirty);
 
   form.appendChild(formRow("Title", titleInput));
   form.appendChild(formRow("Notes", notesInput));
   form.appendChild(formRow("Media", picker.element));
 
   const actions = el("div", { className: "wv-form-actions" });
+  const progress = createProgressStatus();
   const createBtn = el(
     "button",
     {
       className: "wv-btn wv-btn-primary",
-      onclick: async () => {
-        if (!(entry.versions || []).length) {
-          showToast("This entry has no versions to attach an example to.", "error");
-          return;
-        }
-        createBtn.disabled = true;
-        try {
-          const formData = new FormData();
-          const mtimes = {};
-          picker.getByRole("input").forEach((f, i) => {
-            formData.append(`input_${i}`, f);
-            mtimes[`input_${i}`] = f.lastModified;
-          });
-          picker.getByRole("output").forEach((f, i) => {
-            formData.append(`output_${i}`, f);
-            mtimes[`output_${i}`] = f.lastModified;
-          });
-          formData.append(
-            "data",
-            JSON.stringify({
-              title: titleInput.value,
-              notes: notesInput.value,
-              file_mtimes: mtimes,
-            })
-          );
-          const result = await VaultAPI.createExample(entry.id, formData);
-          await controller.refresh();
-          showToast("Example added.", "success");
-          if (result.skipped_files?.length) {
-            showToast(`Skipped unsupported file(s): ${result.skipped_files.join(", ")}`, "warn");
-          }
-          onClose();
-        } catch (e) {
-          showToast(e.message, "error");
-        } finally {
-          createBtn.disabled = false;
-        }
-      },
+      onclick: () => saveExample({ closeAfterSave: true }),
     },
     ["Create Example"]
   );
+  async function saveExample({ closeAfterSave = true } = {}) {
+    if (!(entry.versions || []).length) {
+      showToast("This entry has no versions to attach an example to.", "error");
+      return false;
+    }
+    createBtn.disabled = true;
+    progress.reset();
+    try {
+      const formData = new FormData();
+      const mtimes = {};
+      picker.getByRole("input").forEach((f, i) => {
+        formData.append(`input_${i}`, f);
+        mtimes[`input_${i}`] = f.lastModified;
+      });
+      picker.getByRole("output").forEach((f, i) => {
+        formData.append(`output_${i}`, f);
+        mtimes[`output_${i}`] = f.lastModified;
+      });
+      formData.append(
+        "data",
+        JSON.stringify({
+          title: titleInput.value,
+          notes: notesInput.value,
+          file_mtimes: mtimes,
+        })
+      );
+      const result = await VaultAPI.createExample(entry.id, formData, { onProgress: (event) => progress.update(event) });
+      controller.setDirty(false);
+      await controller.refresh();
+      showToast("Example added.", "success");
+      if (result.skipped_files?.length) {
+        showToast(`Skipped unsupported file(s): ${result.skipped_files.join(", ")}`, "warn");
+      }
+      if (closeAfterSave) closeCleanly();
+      return true;
+    } catch (e) {
+      showToast(e.message, "error");
+      return false;
+    } finally {
+      createBtn.disabled = false;
+      progress.reset();
+    }
+  }
   actions.appendChild(createBtn);
-  actions.appendChild(el("button", { className: "wv-btn", onclick: onClose }, ["Cancel"]));
+  actions.appendChild(progress.element);
+  actions.appendChild(el("button", { className: "wv-btn", onclick: closeCleanly }, ["Cancel"]));
   form.appendChild(actions);
 
   return form;
@@ -306,12 +333,14 @@ function renderAddMediaRow(controller, entry, example) {
 
   const makeZone = (role, label) => {
     let uploading = false;
+    const progress = createProgressStatus();
     const picker = renderMediaPicker({
       role,
       label,
       onChange: async () => {
         if (uploading || picker.isEmpty()) return;
         uploading = true;
+        progress.reset();
         try {
           const formData = new FormData();
           const mtimes = {};
@@ -324,7 +353,7 @@ function renderAddMediaRow(controller, entry, example) {
             mtimes[`new_output_${i}`] = f.lastModified;
           });
           formData.append("data", JSON.stringify({ file_mtimes: mtimes }));
-          const result = await VaultAPI.updateExample(entry.id, example.id, formData);
+          const result = await VaultAPI.updateExample(entry.id, example.id, formData, { onProgress: (event) => progress.update(event) });
           showToast("Media added.", "success");
           if (result.skipped_files?.length) {
             showToast(`Skipped unsupported file(s): ${result.skipped_files.join(", ")}`, "warn");
@@ -333,10 +362,12 @@ function renderAddMediaRow(controller, entry, example) {
         } catch (e) {
           showToast(e.message, "error");
           uploading = false;
+        } finally {
+          progress.reset();
         }
       },
     });
-    return el("div", { className: "wv-example-io-col" }, [picker.element]);
+    return el("div", { className: "wv-example-io-col" }, [picker.element, progress.element]);
   };
 
   row.appendChild(makeZone("input", "Drag inputs here, or"));
@@ -385,7 +416,7 @@ async function renameMedia(controller, entry, example, key, idx) {
 async function deleteMedia(controller, entry, example, key, idx) {
   const ok = await confirmDialog({
     title: "Delete this file?",
-    message: "This file will be permanently deleted from disk.",
+    message: "This file will be removed from the example and moved to your system Trash/Recycle Bin where supported.",
     confirmText: "Delete",
     danger: true,
   });
@@ -419,7 +450,7 @@ async function editExample(controller, entry, example) {
 async function deleteExampleAction(controller, entry, example) {
   const ok = await confirmDialog({
     title: `Delete example "${example.title || example.label}"?`,
-    message: "This permanently deletes all media for this example.",
+    message: "This removes the example and moves its media folder to your system Trash/Recycle Bin where supported.",
     confirmText: "Delete",
     danger: true,
   });

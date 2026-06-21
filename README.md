@@ -125,7 +125,7 @@ example media already filled in. You can switch to your own folder later from
 ### Folder management
 
 - Organize entries into nested folders. The sidebar shows the folder tree for
-  filtering; create, rename, move, and delete folders from the **Organize** tab
+  filtering; create, rename, move, and delete folders from the **Organization** tab
   in Vault Settings. Deleting a folder moves its entries to Uncategorized — it
   never deletes entries.
 - Inline **"Create new folder"** option in any folder picker.
@@ -157,6 +157,10 @@ Vault Settings (⚙) is organized into three tabs:
   - **Card display** — toggle individual grid-card fields (Description, Tags,
     Version count, Example count, Date) on or off for a minimal look.
   - **Appearance** — accent color (preset swatches + custom picker, live preview).
+- **Organization**
+  - **Tags** — rename, merge (rename to an existing tag), or delete tags across
+    all entries.
+  - **Folders** — create, rename, move, or delete nested folders.
 - **Storage**
   - **Footprint** — a breakdown of disk usage: total on disk, a bar splitting
     space across example media / thumbnails / workflows, and counts of
@@ -165,10 +169,10 @@ Vault Settings (⚙) is organized into three tabs:
     choice (WebP/JPEG), plus a batch re-encode action.
   - **Backup** — download the entire vault (entries, media, versions, settings)
     as a single `.zip`.
-- **Organize**
-  - **Tags** — rename, merge (rename to an existing tag), or delete tags across
-    all entries.
-  - **Folders** — create, rename, move, or delete nested folders.
+  - **Health** — check the vault for interrupted saves, orphan entry folders,
+    missing referenced media/workflows, and stale folder references. The same
+    panel can clean `.wv_staging_*` interrupted-save folders by moving them to
+    the OS Trash/Recycle Bin where supported.
 
 ### Quality of life
 
@@ -198,6 +202,40 @@ Vault Settings (⚙) is organized into three tabs:
         example_001/{example.json, inputs/, outputs/}
         ...
 ```
+
+## Recovery and backups
+
+- The vault is plain files, so the best backup is a copy of the whole vault
+  folder or the **Settings → Storage → Export vault (.zip)** action.
+- Whole-entry deletes, example deletes, individual example-media deletes, and
+  interrupted-save cleanup use the OS Trash/Recycle Bin where supported. If the
+  OS has no usable trash mechanism, deletion falls back to permanent removal.
+- New entries are written into hidden `.wv_staging_*` folders first, then moved
+  into place only after the manifest and related files are complete. If ComfyUI
+  exits during a save, the Storage tab's Health panel can detect and clean
+  those staging folders.
+- Health checks are read-only. Cleanup only targets `.wv_staging_*` folders; it
+  does not delete complete entries.
+- Before running batch compression or large cleanup work, make a vault export or
+  copy the vault folder.
+- The selected vault location is stored beside the extension in
+  `vault_config.json`, not inside the vault. Moving a ComfyUI install may require
+  pointing Workflow Vault at the vault folder again.
+
+## Manual smoke checklist
+
+Before calling a build release-ready, test it in a live ComfyUI session:
+
+- ComfyUI starts and both Save/Vault sidebar buttons appear.
+- Create a new entry with a thumbnail, compare image, notes, and example media.
+- Rename that entry and verify its versions, thumbnail, compare image, and
+  examples still open.
+- Open the saved workflow, then save back as a new version and as an overwrite.
+- Add, reorder, rename, and delete example media; deleted media should go to the
+  OS Trash/Recycle Bin where supported.
+- Export a single entry and the full vault.
+- Run **Settings → Storage → Health → Check vault** and confirm the report is
+  clean for the test vault.
 
 ## Notes
 

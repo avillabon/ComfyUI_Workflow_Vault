@@ -1,0 +1,9 @@
+{
+  "notes": [
+    {
+      "id": "note_1A2B3C4D5E6F7A8B9C0D",
+      "title": "Notes",
+      "content": "## Working notes\n\n- v002 increases steps from 20 to 30 for noticeably cleaner detail at a modest speed cost.\n- Works well with denoise around 0.4-0.6 if used as an img2img pass.\n"
+    }
+  ]
+}

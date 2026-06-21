@@ -1,7 +1,7 @@
 // "Save Current Workflow to Vault" flow: create a brand-new entry, or save
 // the current canvas as a new/overwritten version of an existing entry.
 
-import { el, clear, showToast, confirmDialog, toggleField } from "./vault_dom.js";
+import { el, clear, showToast, confirmDialog, toggleField, createProgressStatus } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
 import { STATUS_LABELS, STATUS_ORDER, renderGenTypePicker } from "./vault_modal.js";
 import { renderFolderSelect } from "./vault_folders.js";
@@ -110,7 +110,16 @@ function buildCanvasBanner(nodeCount) {
 
 function renderCreateForm(controller) {
   const wrap = el("div", { className: "wv-wizard-create" });
-  const markDirty = () => controller.setDirty(true);
+  const markDirty = () => controller.setDirty(true, {
+    saveHandler: () => saveNewEntry({ openAfterSave: false }),
+    discardHandler: () => controller.render(),
+    dialog: {
+      title: "Save workflow before leaving?",
+      message: "You have unsaved new-entry changes.",
+      saveText: "Save to Vault",
+      discardText: "Discard",
+    },
+  });
 
   // Required-field validation. Each error renders inline under its field (and we
   // jump focus to the first problem) so the user can see exactly what's missing
@@ -201,7 +210,7 @@ function renderCreateForm(controller) {
     markDirty();
   }
 
-  function addExampleBlock() {
+  function addExampleBlock(markAsDirty = true) {
     const block = el("div", { className: "wv-wizard-example-block" });
     const exampleNotesInput = el("textarea", { className: "wv-input wv-textarea", placeholder: "Notes about this example" });
     const notesRow = formRow("Notes", exampleNotesInput);
@@ -231,9 +240,10 @@ function renderCreateForm(controller) {
     exampleBlocks.push(ref);
     examplesContainer.appendChild(block);
     renumberExamples();
+    if (markAsDirty) markDirty();
   }
 
-  addExampleBlock();
+  addExampleBlock(false);
   examplesPanel.appendChild(examplesContainer);
   examplesPanel.appendChild(
     el("button", { type: "button", className: "wv-btn-link", onclick: () => addExampleBlock() }, [el("i", { className: "pi pi-plus" }), "Add another example"])
@@ -274,6 +284,7 @@ function renderCreateForm(controller) {
 
   // --- Sticky footer: status + save ---
   const status = el("div", { className: "wv-init-status wv-wizard-footer-status", role: "alert" });
+  const progress = createProgressStatus();
   const saveBtn = el("button", { className: "wv-btn wv-btn-primary" }, [el("i", { className: "pi pi-save" }), "Save to Vault"]);
   const setSaving = (saving) => {
     saveBtn.disabled = saving;
@@ -281,7 +292,7 @@ function renderCreateForm(controller) {
       ...(saving ? [document.createTextNode("Saving…")] : [el("i", { className: "pi pi-save" }), document.createTextNode("Save to Vault")])
     );
   };
-  saveBtn.addEventListener("click", async () => {
+  async function saveNewEntry({ openAfterSave = true } = {}) {
     // Validate required fields, surfacing an inline error on each missing one
     // and jumping to the first so the user knows precisely what's needed.
     const checks = [
@@ -300,16 +311,17 @@ function renderCreateForm(controller) {
       status.textContent = "Please complete the required fields.";
       firstBad.focus?.();
       firstBad.scrollIntoView?.({ block: "nearest" });
-      return;
+      return false;
     }
     const name = nameInput.value.trim();
     const workflow = getCurrentWorkflowJSON();
     if (countNodes(workflow) === 0) {
       status.textContent = "The canvas is empty — add nodes before saving.";
-      return;
+      return false;
     }
     setSaving(true);
     status.textContent = "";
+    progress.reset();
     try {
       const data = {
         name,
@@ -368,26 +380,31 @@ function renderCreateForm(controller) {
       data.file_mtimes = mtimes;
       formData.append("data", JSON.stringify(data));
 
-      const entry = await VaultAPI.createEntry(formData);
+      const entry = await VaultAPI.createEntry(formData, { onProgress: (event) => progress.update(event) });
       controller.setDirty(false);
       await controller.refresh();
-      await controller.openEntry(entry.id);
+      if (openAfterSave) await controller.openEntry(entry.id);
       showToast(`"${entry.name}" saved to vault.`, "success");
       if (entry.skipped_files?.length) {
         showToast(`Skipped unsupported file(s): ${entry.skipped_files.join(", ")}`, "warn");
       }
+      return true;
     } catch (e) {
       status.textContent = e.message;
+      return false;
     } finally {
       setSaving(false);
+      progress.reset();
     }
-  });
+  }
+  saveBtn.addEventListener("click", () => saveNewEntry({ openAfterSave: true }));
 
   // Exposed (not appended here) so the wizard can mount it OUTSIDE the scroll
   // body — a sticky footer inside the scroll area overlaps and steals clicks
   // from the content above it (e.g. the thumbnail dropzone).
   wrap.wizardFooter = el("div", { className: "wv-wizard-footer" }, [
     el("span", { className: "wv-wizard-footer-hint" }, [el("i", { className: "pi pi-info-circle" }), " Fields marked * are required"]),
+    progress.element,
     status,
     saveBtn,
   ]);
@@ -401,7 +418,17 @@ function renderCreateForm(controller) {
 
 function renderUpdateForm(controller) {
   const form = el("div", { className: "wv-form" });
-  const markDirty = () => controller.setDirty(true);
+  let currentSaveHandler = null;
+  const markDirty = () => controller.setDirty(true, {
+    saveHandler: () => currentSaveHandler ? currentSaveHandler() : false,
+    discardHandler: () => controller.render(),
+    dialog: {
+      title: "Save workflow update before leaving?",
+      message: "You have unsaved workflow update changes.",
+      saveText: "Save to Vault",
+      discardText: "Discard",
+    },
+  });
 
   const entries = [...(controller.state.entries || [])].sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || ""));
 
@@ -463,11 +490,13 @@ function renderUpdateForm(controller) {
 
     saveAsRadio.addEventListener("change", () => {
       if (!saveAsRadio.checked) return;
+      markDirty();
       newVersionFields.style.display = "";
       overwriteWarning.style.display = "none";
     });
     overwriteRadio.addEventListener("change", () => {
       if (!overwriteRadio.checked) return;
+      markDirty();
       newVersionFields.style.display = "none";
       overwriteWarning.style.display = "";
     });
@@ -486,45 +515,46 @@ function renderUpdateForm(controller) {
     detailContainer.appendChild(status);
 
     const actions = el("div", { className: "wv-form-actions" });
+    async function saveUpdate({ openAfterSave = true } = {}) {
+      saveBtn.disabled = true;
+      status.textContent = "";
+      try {
+        const workflow = getCurrentWorkflowJSON();
+        if (overwriteRadio.checked && currentVersion) {
+          const ok = await confirmDialog({
+            title: "Overwrite current version?",
+            message: "This replaces the saved workflow for the current version with the current canvas. This cannot be undone.",
+            confirmText: "Overwrite",
+            danger: true,
+          });
+          if (!ok) return false;
+          await VaultAPI.overwriteVersion(entry.id, currentVersion.id, { workflow });
+        } else {
+          await VaultAPI.createVersion(entry.id, {
+            workflow,
+            custom_label: customLabelInput.value.trim() || null,
+            notes: notesInput.value,
+            make_current: true,
+          });
+        }
+        controller.setDirty(false);
+        await controller.refresh();
+        if (openAfterSave) await controller.openEntry(entry.id, "settings");
+        showToast(`Saved to "${entry.name}".`, "success");
+        return true;
+      } catch (e) {
+        status.textContent = e.message;
+        return false;
+      } finally {
+        saveBtn.disabled = false;
+      }
+    }
+    currentSaveHandler = () => saveUpdate({ openAfterSave: false });
     const saveBtn = el(
       "button",
       {
         className: "wv-btn wv-btn-primary",
-        onclick: async () => {
-          saveBtn.disabled = true;
-          status.textContent = "";
-          try {
-            const workflow = getCurrentWorkflowJSON();
-            if (overwriteRadio.checked && currentVersion) {
-              const ok = await confirmDialog({
-                title: "Overwrite current version?",
-                message: "This replaces the saved workflow for the current version with the current canvas. This cannot be undone.",
-                confirmText: "Overwrite",
-                danger: true,
-              });
-              if (!ok) {
-                saveBtn.disabled = false;
-                return;
-              }
-              await VaultAPI.overwriteVersion(entry.id, currentVersion.id, { workflow });
-            } else {
-              await VaultAPI.createVersion(entry.id, {
-                workflow,
-                custom_label: customLabelInput.value.trim() || null,
-                notes: notesInput.value,
-                make_current: true,
-              });
-            }
-            controller.setDirty(false);
-            await controller.refresh();
-            await controller.openEntry(entry.id, "settings");
-            showToast(`Saved to "${entry.name}".`, "success");
-          } catch (e) {
-            status.textContent = e.message;
-          } finally {
-            saveBtn.disabled = false;
-          }
-        },
+        onclick: () => saveUpdate({ openAfterSave: true }),
       },
       ["Save to Vault"]
     );

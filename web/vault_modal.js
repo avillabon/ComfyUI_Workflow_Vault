@@ -4,7 +4,6 @@
 import { el, formatDateOnly, showToast, confirmDialog, onActivate, toggleField } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
 import { openCurrentVersion } from "./vault_detail.js";
-import { renderFolderTree, folderPath } from "./vault_folders.js";
 import { buildCompareSlider } from "./vault_compare_slider.js";
 
 // Bump this on each edit to the current date (CalVer); shown in the footer.
@@ -219,11 +218,7 @@ export function renderTopbar(controller) {
     "button",
     {
       className: "wv-btn wv-btn-primary",
-      onclick: () =>
-        controller.openWizard({
-          mode: "full",
-          defaultFolderId: typeof controller.filters.folderId === "string" ? controller.filters.folderId : null,
-        }),
+      onclick: () => controller.openWizard({ mode: "full" }),
     },
     ["+ New Entry"]
   );
@@ -309,7 +304,6 @@ export function renderGridBody(controller) {
 
   const sidebar = el("div", { className: "wv-sidebar" });
   renderGenerationTypeFilter(sidebar, controller);
-  renderFolderTree(sidebar, controller);
   sidebar.appendChild(renderSidebarFooter());
   body.appendChild(sidebar);
 
@@ -386,54 +380,9 @@ function renderGenerationTypeFilter(container, controller) {
 }
 
 function renderBreadcrumb(controller) {
-  const { state, filters } = controller;
   const row = el("div", { className: "wv-breadcrumb" });
 
-  const goAll = () => {
-    controller.filters.folderId = undefined;
-    controller.render();
-  };
-  row.appendChild(
-    el(
-      "span",
-      {
-        className: `wv-breadcrumb-item${filters.folderId === undefined ? " wv-breadcrumb-active" : ""}`,
-        role: "button",
-        tabindex: "0",
-        onclick: goAll,
-        onkeydown: onActivate(goAll),
-      },
-      ["All Workflows"]
-    )
-  );
-
-  if (filters.folderId === null) {
-    row.appendChild(el("span", { className: "wv-breadcrumb-sep" }, ["/"]));
-    row.appendChild(el("span", { className: "wv-breadcrumb-item wv-breadcrumb-active" }, ["Uncategorized"]));
-  } else if (filters.folderId) {
-    const path = folderPath(state.folders, filters.folderId);
-    for (const folder of path) {
-      row.appendChild(el("span", { className: "wv-breadcrumb-sep" }, ["/"]));
-      const isLast = folder.id === filters.folderId;
-      const goFolder = () => {
-        controller.filters.folderId = folder.id;
-        controller.render();
-      };
-      row.appendChild(
-        el(
-          "span",
-          {
-            className: `wv-breadcrumb-item${isLast ? " wv-breadcrumb-active" : ""}`,
-            role: "button",
-            tabindex: "0",
-            onclick: goFolder,
-            onkeydown: onActivate(goFolder),
-          },
-          [folder.name]
-        )
-      );
-    }
-  }
+  row.appendChild(el("span", { className: "wv-breadcrumb-item wv-breadcrumb-active" }, ["All Workflows"]));
 
   // Per-row (grid density) control lives on the breadcrumb line, pushed to the
   // right edge by a flexible spacer.
@@ -480,12 +429,6 @@ function filterEntries(controller) {
 
   if (filters.generationType) {
     entries = entries.filter((e) => (e.generation_types || []).includes(filters.generationType));
-  }
-
-  if (filters.folderId === null) {
-    entries = entries.filter((e) => !e.folder_id);
-  } else if (filters.folderId !== undefined) {
-    entries = entries.filter((e) => e.folder_id === filters.folderId);
   }
 
   const search = (filters.search || "").trim().toLowerCase();
@@ -689,7 +632,7 @@ function renderEmptyState(controller) {
           className: "wv-btn",
           onclick: () => {
             const showArchived = controller.filters.showArchived;
-            controller.filters = { search: "", folderId: undefined, status: null, favoritesOnly: false, showArchived, generationType: null };
+            controller.filters = { search: "", status: null, favoritesOnly: false, showArchived, generationType: null };
             controller.render();
           },
         },

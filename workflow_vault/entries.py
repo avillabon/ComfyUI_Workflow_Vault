@@ -5,7 +5,6 @@ import shutil
 
 from . import config
 from . import examples as examples_mod
-from . import folders as folders_mod
 from . import media as media_mod
 from . import storage, utils, versions
 
@@ -131,7 +130,10 @@ def create_entry(vault_root, data):
         "thumbnail_source_compressed": False,
         "compare_image": None,
         "compare_image_source": None,
-        "folder_id": data.get("folder_id"),
+        # Folders are deprecated: the vault is tag-first. New entries are never
+        # filed into a folder. Legacy folder_id values on existing entries are
+        # preserved and can be converted to tags (see convert_folders_to_tags).
+        "folder_id": None,
         "current_version_id": None,
         "created_at": now,
         "updated_at": now,
@@ -216,12 +218,6 @@ def create_entry(vault_root, data):
         shutil.rmtree(staging_dir, ignore_errors=True)
         return None, f"Could not create entry: {e}"
 
-    if manifest["folder_id"]:
-        ok, ferr = folders_mod.add_entry_to_folder(vault_root, manifest["folder_id"], manifest["id"])
-        if not ok:
-            manifest["folder_id"] = None
-            storage.write_manifest(vault_root, slug, manifest)
-
     entry_state = storage.build_entry_state(vault_root, slug)
     if skipped_files:
         entry_state["skipped_files"] = skipped_files
@@ -270,11 +266,8 @@ def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None,
     if "favorite" in data:
         manifest["favorite"] = bool(data["favorite"])
 
-    if "folder_id" in data:
-        ok, ferr = folders_mod.set_entry_folder(vault_root, manifest["id"], data["folder_id"])
-        if not ok:
-            return new_slug, ferr
-        manifest["folder_id"] = data["folder_id"]
+    # Folder assignments are no longer written (folders are deprecated). Any
+    # existing manifest["folder_id"] is left untouched as legacy metadata.
 
     if thumbnail_file:
         rel, merr = media_mod.save_thumbnail(
@@ -382,6 +375,8 @@ def duplicate_entry(vault_root, source_slug, new_name):
     manifest["name"] = new_name
     manifest["created_at"] = now
     manifest["updated_at"] = now
+    # A duplicate is a brand-new entry: tag-first, never filed into a folder.
+    manifest["folder_id"] = None
 
     # Keep only the source's current version; drop the rest of the history.
     _trim_to_single_version(vault_root, new_slug, manifest, src_manifest.get("current_version_id"))
@@ -389,14 +384,6 @@ def duplicate_entry(vault_root, source_slug, new_name):
     _reidentify_examples(vault_root, new_slug)
 
     storage.write_manifest(vault_root, new_slug, manifest)
-
-    # Mirror folder membership (manifest.folder_id was copied verbatim, but the
-    # folder's own entry_ids list needs the new entry id added).
-    if manifest.get("folder_id"):
-        ok, _ferr = folders_mod.add_entry_to_folder(vault_root, manifest["folder_id"], manifest["id"])
-        if not ok:
-            manifest["folder_id"] = None
-            storage.write_manifest(vault_root, new_slug, manifest)
 
     return storage.build_entry_state(vault_root, new_slug), None
 
@@ -561,3 +548,69 @@ def delete_tag(vault_root, tag):
         storage.write_manifest(vault_root, slug, manifest)
         count += 1
     return count, None
+
+
+# ---------------------------------------------------------------------------
+# Legacy folders -> tags (explicit, one-time conversion)
+# ---------------------------------------------------------------------------
+
+def _folder_path_names(folders_by_id, folder_id):
+    """Return the folder names from root to folder_id (e.g. ["Image", "Cleanup"]).
+
+    Guards against cycles in malformed folders.json so a bad parent_id chain
+    can never loop forever."""
+    names = []
+    seen = set()
+    current = folders_by_id.get(folder_id)
+    while current and current.get("id") not in seen:
+        seen.add(current.get("id"))
+        name = (current.get("name") or "").strip()
+        if name:
+            names.append(name)
+        current = folders_by_id.get(current.get("parent_id"))
+    names.reverse()
+    return names
+
+
+def convert_folders_to_tags(vault_root, allowed_tags=None):
+    """Add each entry's legacy folder-path names to its tags.
+
+    Folders are deprecated, but old vaults may still carry folder_id values and
+    a folders.json. This is the explicit, user-triggered migration: an entry in
+    "Image / Cleanup" gains the tags "image" and "cleanup". It is additive and
+    non-destructive — folders.json is left in place and folder_id is preserved,
+    so the action is safe to re-run (duplicate tags are avoided).
+
+    `allowed_tags`, when given, restricts the migration to those folder-name
+    tags (normalized): any folder name not in the set is skipped, so the user
+    can convert some folder names and leave junk ones behind. None converts all.
+
+    Returns {"converted": <entries that gained at least one candidate tag slot>,
+             "added": <total new tags added across all entries>}."""
+    folders = storage.read_folders(vault_root)
+    folders_by_id = {f.get("id"): f for f in folders if f.get("id")}
+    allow = None if allowed_tags is None else set(normalize_tags(allowed_tags))
+
+    converted = 0
+    added = 0
+    for slug in storage.list_entry_slugs(vault_root):
+        manifest = storage.read_manifest(vault_root, slug)
+        if not manifest:
+            continue
+        folder_id = manifest.get("folder_id")
+        if not folder_id:
+            continue
+        candidate = normalize_tags(_folder_path_names(folders_by_id, folder_id))
+        if allow is not None:
+            candidate = [t for t in candidate if t in allow]
+        if not candidate:
+            continue
+        existing = normalize_tags(manifest.get("tags"))
+        merged = normalize_tags(existing + candidate)
+        converted += 1
+        if merged != existing:
+            added += len(merged) - len(existing)
+            manifest["tags"] = merged
+            manifest["updated_at"] = utils.now_iso()
+            storage.write_manifest(vault_root, slug, manifest)
+    return {"converted": converted, "added": added}

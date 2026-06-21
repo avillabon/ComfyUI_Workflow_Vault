@@ -17,7 +17,7 @@ export class VaultApp {
     this.selectedEntryId = null;
     this.selectedTab = "overview";
     this.settingsSection = "info"; // sub-section within the Settings tab
-    this.filters = { search: "", folderId: undefined, status: null, favoritesOnly: false, showArchived: undefined, generationType: null };
+    this.filters = { search: "", status: null, favoritesOnly: false, showArchived: undefined, generationType: null };
     this.isDirty = false;
     this.dirtySaveHandler = null;
     this.dirtyDiscardHandler = null;

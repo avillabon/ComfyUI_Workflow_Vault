@@ -929,6 +929,27 @@ async def post_delete_tag(request):
         return web.json_response({"updated": count, **_full_state(vault_root)})
 
 
+@routes.post("/workflow-vault/convert-folders-to-tags")
+async def post_convert_folders_to_tags(request):
+    """Explicit one-time migration of legacy folder paths into plain tags.
+
+    Additive and non-destructive: folders.json and entry folder_id values are
+    left untouched. Distinct path (not /folders/...) so it never collides with
+    the dynamic /workflow-vault/folders/{folder_id} route."""
+    vault_root, err = _require_vault()
+    if err:
+        return err
+    body = {}
+    if request.can_read_body:
+        body, err = await _read_json(request)
+        if err:
+            return err
+    allowed = body.get("tags") if isinstance(body.get("tags"), list) else None
+    async with _write_lock(vault_root):
+        result = await asyncio.to_thread(entries.convert_folders_to_tags, vault_root, allowed)
+        return web.json_response({"ok": True, **result, **_full_state(vault_root)})
+
+
 # ---------------------------------------------------------------------------
 # Media
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "id": "entry_1A2B3C4D5E6F70819203",
   "slug": "image_cleanup_test",
-  "name": "Image Cleanup & Restore",
+  "name": "Image Cleanup",
   "description": "Cleans up noise and minor artifacts in a generated or scanned image, then sharpens the result.",
   "tags": [
     "image",

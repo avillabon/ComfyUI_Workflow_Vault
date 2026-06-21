@@ -3,7 +3,6 @@
 
 import { el, showToast, confirmDialog, promptDialog, applyAccentColor } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
-import { buildFolderTree, countEntriesInFolder, createFolder, renameFolder, moveFolder, deleteFolder } from "./vault_folders.js";
 
 // Optional grid-card fields the user can hide for a more minimal look.
 const CARD_FIELD_DEFS = [
@@ -140,8 +139,8 @@ export function renderGlobalSettings(controller) {
   const sections = {
     general: el("div", { className: "wv-settings-section" }),
     storage: el("div", { className: "wv-settings-section" }),
-    // Organize holds two list panels (Tags, Folders) that read better side by
-    // side on wide screens than stacked in a narrow centered column.
+    // Organization holds the Tags panel (plus a one-time legacy folder→tag
+    // conversion when an older vault still carries folder assignments).
     organize: el("div", { className: "wv-settings-section wv-settings-section-wide" }),
   };
   const tabBar = el("div", { className: "wv-tab-bar" });
@@ -481,42 +480,107 @@ export function renderGlobalSettings(controller) {
   }
   sections.organize.appendChild(tagPanel);
 
-  // --- Folders ---
-  const folders = state.folders || [];
-  const foldersPanel = panel(
-    "Folders",
-    "pi pi-folder",
-    "Create, rename, move, or delete folders. Deleting a folder moves its entries to Uncategorized — it never deletes entries."
-  );
-  foldersPanel.appendChild(
-    el("div", { className: "wv-folder-manager-actions" }, [
-      el("button", { className: "wv-btn", onclick: () => createFolder(controller, null) }, [el("i", { className: "pi pi-plus" }), " New folder"]),
-    ])
-  );
-  if (!folders.length) {
-    foldersPanel.appendChild(el("p", { className: "wv-muted" }, ["No folders yet."]));
-  } else {
-    const listEl = el("div", { className: "wv-folder-manager" });
-    const walk = (nodes, depth) => {
-      for (const node of nodes) {
-        const count = countEntriesInFolder(state, node.id);
-        listEl.appendChild(
-          el("div", { className: "wv-folder-manager-row", style: { paddingLeft: `${10 + depth * 16}px` } }, [
-            el("span", { className: "wv-folder-manager-name" }, [el("i", { className: "pi pi-folder" }), node.name]),
-            el("span", { className: "wv-folder-manager-count" }, [`${count}`]),
-            el("button", { className: "wv-icon-btn", title: "New subfolder", "aria-label": `New subfolder in ${node.name}`, onclick: () => createFolder(controller, node.id) }, [el("i", { className: "pi pi-plus" })]),
-            el("button", { className: "wv-icon-btn", title: "Rename", "aria-label": `Rename folder ${node.name}`, onclick: () => renameFolder(controller, node) }, [el("i", { className: "pi pi-pencil" })]),
-            el("button", { className: "wv-icon-btn", title: "Move", "aria-label": `Move folder ${node.name}`, onclick: () => moveFolder(controller, node) }, [el("i", { className: "pi pi-arrows-h" })]),
-            el("button", { className: "wv-icon-btn wv-icon-btn-danger", title: "Delete", "aria-label": `Delete folder ${node.name}`, onclick: () => deleteFolder(controller, node) }, [el("i", { className: "pi pi-trash" })]),
+  // --- Legacy folders (deprecated; explicit one-time conversion to tags) ---
+  // Folders are no longer an active concept. This panel only appears for older
+  // vaults that still carry folder assignments. It shows the exact folder names
+  // that would become tags, each with a checkbox so the user keeps control over
+  // which ones to apply (untick junk folders). It is additive: folders.json and
+  // folder_id values are preserved, nothing is deleted.
+  const legacyFolders = state.folders || [];
+  const legacyFoldersById = new Map(legacyFolders.map((f) => [f.id, f]));
+  const folderedEntries = legacyFolders.length ? (state.entries || []).filter((e) => e.folder_id) : [];
+
+  const legacyPathNames = (folderId) => {
+    const names = [];
+    const seen = new Set();
+    let cur = legacyFoldersById.get(folderId);
+    while (cur && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      const n = (cur.name || "").trim();
+      if (n) names.push(n);
+      cur = legacyFoldersById.get(cur.parent_id);
+    }
+    return names.reverse();
+  };
+
+  // Distinct folder-name tags that would ADD something, with how many entries
+  // would newly gain each (folder names already present as a tag are skipped).
+  const tagNewCounts = new Map();
+  for (const e of folderedEntries) {
+    const have = new Set((e.tags || []).map((t) => t.toLowerCase()));
+    const names = [...new Set(legacyPathNames(e.folder_id).map((n) => n.toLowerCase()).filter(Boolean))];
+    for (const t of names) {
+      if (!have.has(t)) tagNewCounts.set(t, (tagNewCounts.get(t) || 0) + 1);
+    }
+  }
+
+  if (folderedEntries.length > 0) {
+    const legacyPanel = panel(
+      "Legacy folders",
+      "pi pi-folder",
+      "Folders are deprecated — the vault is tag-first now. Convert old folder paths into plain tags. This is additive: your folder data is preserved and nothing is deleted."
+    );
+    const convertableTags = [...tagNewCounts.keys()].sort();
+
+    if (!convertableTags.length) {
+      legacyPanel.appendChild(
+        el("p", { className: "wv-muted" }, [
+          `${folderedEntries.length} workflow${folderedEntries.length === 1 ? "" : "s"} still reference legacy folders, ` +
+            "but every folder name is already a tag — there's nothing to add.",
+        ])
+      );
+    } else {
+      legacyPanel.appendChild(
+        el("p", { className: "wv-radio-desc" }, [
+          `${folderedEntries.length} workflow${folderedEntries.length === 1 ? "" : "s"} reference legacy folders. ` +
+            "Pick which folder names to add as tags — untick any you don't want.",
+        ])
+      );
+      const checks = new Map();
+      const checklist = el("div", { className: "wv-tag-manager" });
+      for (const t of convertableTags) {
+        const cb = el("input", { type: "checkbox", className: "wv-checkbox-input", checked: true });
+        checks.set(t, cb);
+        checklist.appendChild(
+          el("label", { className: "wv-tag-manager-row" }, [
+            cb,
+            el("span", { className: "wv-tag-manager-name" }, [t]),
+            el("span", { className: "wv-tag-manager-count", title: "workflows that would gain this tag" }, [`+${tagNewCounts.get(t)}`]),
           ])
         );
-        walk(node.children, depth + 1);
       }
-    };
-    walk(buildFolderTree(folders), 0);
-    foldersPanel.appendChild(listEl);
+      legacyPanel.appendChild(checklist);
+
+      const convertStatus = el("span", { className: "wv-vs-footer-status" });
+      const convertBtn = el("button", { className: "wv-btn wv-btn-primary" }, [el("i", { className: "pi pi-tags" }), "Convert selected to tags"]);
+      convertBtn.onclick = async () => {
+        const selected = convertableTags.filter((t) => checks.get(t).checked);
+        if (!selected.length) {
+          showToast("Select at least one folder name to convert.", "error");
+          return;
+        }
+        convertBtn.disabled = true;
+        convertStatus.textContent = "Converting…";
+        try {
+          const res = await VaultAPI.convertFoldersToTags(selected);
+          convertStatus.textContent = "";
+          showToast(
+            `Converted folder paths for ${res.converted} workflow${res.converted === 1 ? "" : "s"}. ` +
+              `Added ${res.added} tag${res.added === 1 ? "" : "s"}.`,
+            "success"
+          );
+          await controller.refresh();
+        } catch (e) {
+          convertStatus.textContent = "";
+          showToast(e.message, "error");
+        } finally {
+          convertBtn.disabled = false;
+        }
+      };
+      legacyPanel.appendChild(el("div", { className: "wv-vs-batch-action" }, [convertStatus, convertBtn]));
+    }
+    sections.organize.appendChild(legacyPanel);
   }
-  sections.organize.appendChild(foldersPanel);
 
   // --- Health / recovery ---
   sections.storage.appendChild(renderHealthPanel(controller));
@@ -536,7 +600,7 @@ function renderHealthPanel(controller) {
   const healthPanel = panel(
     "Vault health",
     "pi pi-heart",
-    "Checks for interrupted saves, missing referenced files, and stale folder references. Checking is read-only."
+    "Checks for interrupted saves, orphan entry folders, and missing referenced files. Checking is read-only."
   );
   const summary = el("div", { className: "wv-health-summary" }, [el("div", { className: "wv-muted" }, ["Run a check to inspect this vault."])]);
   const issueList = el("div", { className: "wv-health-issues" });
@@ -632,11 +696,9 @@ function issueTitle(issue) {
   const names = {
     staging_entry: "Interrupted save",
     orphan_entry_dir: "Orphan entry folder",
-    missing_folder: "Missing folder",
     missing_media: "Missing media",
     missing_workflow: "Missing workflow",
     missing_example_media: "Missing example media",
-    stale_folder_entry: "Stale folder entry",
   };
   return names[issue?.type] || "Vault issue";
 }

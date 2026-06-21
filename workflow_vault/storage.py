@@ -279,13 +279,12 @@ def health_report(vault_root):
         "staging_entries": 0,
         "orphan_entry_dirs": 0,
         "missing_files": 0,
-        "folder_reference_issues": 0,
     }
 
+    # Folders are deprecated, so legacy folder_id values and folders.json are
+    # treated as inert metadata: the health report intentionally does not flag
+    # them as issues anymore.
     edir = entries_dir(vault_root)
-    entry_ids = set()
-    folders = read_folders(vault_root)
-    folder_ids = {f.get("id") for f in folders if f.get("id")}
 
     if os.path.isdir(edir):
         for name in sorted(os.listdir(edir)):
@@ -316,18 +315,6 @@ def health_report(vault_root):
             continue
         summary["entries"] += 1
         entry_id = manifest.get("id")
-        if entry_id:
-            entry_ids.add(entry_id)
-        folder_id = manifest.get("folder_id")
-        if folder_id and folder_id not in folder_ids:
-            summary["folder_reference_issues"] += 1
-            issues.append({
-                "severity": "warning",
-                "type": "missing_folder",
-                "entry_id": entry_id,
-                "entry_slug": slug,
-                "message": "Entry points at a folder id that does not exist.",
-            })
 
         entry_root = entry_dir(vault_root, slug)
         for key in ("thumbnail", "thumbnail_source", "compare_image", "compare_image_source"):
@@ -383,18 +370,6 @@ def health_report(vault_root):
                         "path": rel,
                         "message": "Example references a media file that is missing or invalid.",
                     })
-
-    for folder in folders:
-        for entry_id in folder.get("entry_ids", []) or []:
-            if entry_id not in entry_ids:
-                summary["folder_reference_issues"] += 1
-                issues.append({
-                    "severity": "warning",
-                    "type": "stale_folder_entry",
-                    "folder_id": folder.get("id"),
-                    "entry_id": entry_id,
-                    "message": "Folder lists an entry id that does not exist.",
-                })
 
     return {"ok": not issues, "summary": summary, "issues": issues}
 

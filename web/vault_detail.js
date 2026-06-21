@@ -4,7 +4,6 @@
 import { el, clear, formatDate, showToast, confirmDialog, promptDialog, openImageLightbox, toggleField, createProgressStatus } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
 import { STATUS_LABELS, STATUS_ORDER, renderGenTypePicker, GENERATION_TYPE_MAP } from "./vault_modal.js";
-import { renderFolderSelect } from "./vault_folders.js";
 import { openWorkflowInGraph } from "./vault_workflow.js";
 import { renderVersionsTab } from "./vault_versions_tab.js";
 import { renderExamplesTab } from "./vault_examples_tab.js";
@@ -257,9 +256,6 @@ function renderEntryMetadataForm(controller, entry) {
 
   const favSwitch = toggleField("Favorite", !!entry.favorite, markDirty);
 
-  controller.state.folders = controller.state.folders || [];
-  const folderSelect = renderFolderSelect({ folders: controller.state.folders, selectedId: entry.folder_id || "" });
-
   const thumbField = renderThumbnailField({
     currentUrl: entry.thumbnail ? VaultAPI.mediaUrl(entry.id, entry.thumbnail, entry.updated_at) : null,
   });
@@ -281,7 +277,7 @@ function renderEntryMetadataForm(controller, entry) {
       },
     });
   }
-  for (const input of [nameInput, descInput, statusSelect, folderSelect, thumbField.fileInput, compareField.fileInput]) {
+  for (const input of [nameInput, descInput, statusSelect, thumbField.fileInput, compareField.fileInput]) {
     input.addEventListener("input", markDirty);
     input.addEventListener("change", markDirty);
   }
@@ -294,7 +290,6 @@ function renderEntryMetadataForm(controller, entry) {
   leftCol.appendChild(formRow("Description", descInput));
   leftCol.appendChild(formRow("Status", statusSelect));
   leftCol.appendChild(formRow("Generation types", genTypePicker));
-  leftCol.appendChild(formRow("Folder", folderSelect));
   leftCol.appendChild(formRow("Tags", tagInput));
   leftCol.appendChild(el("div", { className: "wv-form-row" }, [favSwitch]));
 
@@ -328,7 +323,6 @@ function renderEntryMetadataForm(controller, entry) {
         status: statusSelect.value,
         generation_types: genTypePicker.getSelected(),
         favorite: favSwitch.input.checked,
-        folder_id: folderSelect.value === "__new__" ? null : folderSelect.value || null,
       };
       // Display thumbnail + untouched original (archival), both stamped
       // with the source date. For a video the picker yields an animated

@@ -50,9 +50,9 @@ example media already filled in. You can switch to your own folder later from
 - **Grid view** with search, status filter, Favorites and Show-archived
   toggles, sort controls (by name, created date, or last updated), and a
   **per-row density selector** (2, 3, or 4 columns) on the breadcrumb line.
-- **Sidebar** leads with a **Generation Type** filter (Image, Video, Audio, 3D
-  Model, LLM, API Nodes) with live counts, followed by a nested folder tree. An
-  entry can carry more than one type and shows up under each.
+- **Sidebar** is a **Generation Type** filter (Image, Video, Audio, 3D Model,
+  LLM, API Nodes) with live counts. An entry can carry more than one type and
+  shows up under each.
 - **Favorites** — star any entry from the grid card or detail view; favorites
   pin to the top in "last updated" sort order.
 - **Grid cards** show the thumbnail, entry name, status, generation type
@@ -73,7 +73,7 @@ example media already filled in. You can switch to your own folder later from
 
 ### Entry detail
 
-- **Overview tab** — a read-only summary (description, tags, status, folder,
+- **Overview tab** — a read-only summary (description, tags, status,
   generation type, and the thumbnail with **Open folder** and **Export (.zip)**
   buttons — the latter downloads the whole entry as a zip) followed by a full
   gallery of example media. When the entry has a compare image, the Overview
@@ -86,7 +86,7 @@ example media already filled in. You can switch to your own folder later from
   in-place editing.
 - **Settings tab** with three sub-tabs:
   - **Workflow Details** — edit name, description, tags (with autocomplete),
-    status, generation type, folder, favorite toggle, and thumbnail (image or
+    status, generation type, favorite toggle, and thumbnail (image or
     video, same as the Save wizard), plus read-only stats (created/updated
     dates, version count, example count).
   - **Versions** — full version history: add a new version, overwrite the
@@ -103,7 +103,7 @@ example media already filled in. You can switch to your own folder later from
 
 - Save the current canvas as a **new entry** or as a **new version /
   overwrite** of an existing one, with notes, examples (input/output media),
-  folder, favorite toggle, and a thumbnail — all in one step.
+  favorite toggle, and a thumbnail — all in one step.
 - A new entry requires a **name, a status, at least one tag, and at least one
   generation type** before it can be saved; anything missing is flagged inline.
   Status starts unset, so it's always a deliberate choice.
@@ -122,13 +122,22 @@ example media already filled in. You can switch to your own folder later from
   grid card and Overview preview. Its untouched original is archived too, and a
   × clears it. Also editable later from **Settings → Workflow Details**.
 
-### Folder management
+### Organization (tag-first)
 
-- Organize entries into nested folders. The sidebar shows the folder tree for
-  filtering; create, rename, move, and delete folders from the **Organization** tab
-  in Vault Settings. Deleting a folder moves its entries to Uncategorized — it
-  never deletes entries.
-- Inline **"Create new folder"** option in any folder picker.
+- The vault is **tag-first**: organize and filter with **tags**, plus **status**,
+  **favorites**, **generation type**, and full-text **search**. A workflow is
+  multi-dimensional (e.g. Flux, portrait, upscaler, client-ready, heavy-vram), so
+  tags fit it better than forcing a single folder "home."
+- **Tags** are added per entry in the Save wizard and the entry editor, and
+  managed vault-wide in **Settings → Organization** (rename, merge, delete across
+  all entries).
+- **Legacy folders:** vaults created before folders were deprecated keep their
+  folder data untouched. **Settings → Organization** shows a one-time conversion
+  that turns folder-path names into plain tags (e.g. `Image / Cleanup` →
+  `image`, `cleanup`). It lists each folder name with a checkbox and a count, so
+  you choose which to keep and untick any junk folders before converting.
+  Nothing is deleted — `folders.json` and the entries' folder assignments are
+  preserved, so it's safe to re-run.
 
 ### Image compression (Pillow)
 
@@ -160,7 +169,10 @@ Vault Settings (⚙) is organized into three tabs:
 - **Organization**
   - **Tags** — rename, merge (rename to an existing tag), or delete tags across
     all entries.
-  - **Folders** — create, rename, move, or delete nested folders.
+  - **Legacy folders** — appears only if the vault still has folder assignments
+    from before folders were deprecated; offers a one-time conversion of folder
+    paths into tags, with a checkbox per folder name so you choose which to
+    apply. Folder data is preserved, never deleted.
 - **Storage**
   - **Footprint** — a breakdown of disk usage: total on disk, a bar splitting
     space across example media / thumbnails / workflows, and counts of
@@ -170,9 +182,9 @@ Vault Settings (⚙) is organized into three tabs:
   - **Backup** — download the entire vault (entries, media, versions, settings)
     as a single `.zip`.
   - **Health** — check the vault for interrupted saves, orphan entry folders,
-    missing referenced media/workflows, and stale folder references. The same
-    panel can clean `.wv_staging_*` interrupted-save folders by moving them to
-    the OS Trash/Recycle Bin where supported.
+    and missing referenced media/workflows. The same panel can clean
+    `.wv_staging_*` interrupted-save folders by moving them to the OS
+    Trash/Recycle Bin where supported.
 
 ### Quality of life
 
@@ -185,7 +197,7 @@ Vault Settings (⚙) is organized into three tabs:
 ```
 <vault root>/
   vault_settings.json
-  folders.json
+  folders.json             ← legacy (folders are deprecated; preserved if present)
   entries/
     <entry_slug>/
       manifest.json

@@ -1,0 +1,21 @@
+[project]
+name = "comfy-workflow-vault"
+version = "1.0.0"
+description = "A local, single-user workflow library inside ComfyUI: save workflows as structured entries with versions, example media, and Markdown docs, then browse, tag, search, and reopen them."
+license = { file = "LICENSE" }
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "Pillow",
+    "imageio-ffmpeg",
+]
+
+[project.urls]
+Repository = "https://github.com/avillabon/ComfyUI_Workflow_Vault"
+"Bug Tracker" = "https://github.com/avillabon/ComfyUI_Workflow_Vault/issues"
+
+[tool.comfy]
+# PublisherId is the @handle from your registry.comfy.org profile (public — NOT
+# the API key): https://registry.comfy.org/publishers/avillabon
+PublisherId = "avillabon"
+DisplayName = "Workflow Vault"

@@ -7,8 +7,8 @@ import { openCurrentVersion } from "./vault_detail.js";
 import { buildCompareSlider } from "./vault_compare_slider.js";
 import { tagCountsFrom } from "./vault_tag_input.js";
 
-// Bump this on each edit to the current date (CalVer); shown in the footer.
-export const VAULT_VERSION = "2026.06.22";
+// App version (SemVer). Keep in sync with pyproject.toml; shown in the footer.
+export const VAULT_VERSION = "1.0.0";
 export const AUTHOR_NAME = "Alex Villabón";
 export const AUTHOR_URL = "https://www.youtube.com/@alexvillabon";
 export const REPO_URL = "https://github.com/avillabon/ComfyUI_Workflow_Vault";

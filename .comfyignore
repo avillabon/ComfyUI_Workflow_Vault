@@ -1,0 +1,8 @@
+# Files kept out of the published Comfy Registry package (gitignore syntax).
+# The portable ComfyUI test install and the standalone build are already
+# gitignored, so they're excluded automatically; these are belt-and-suspenders
+# plus dev-only files that could become tracked later.
+tests/
+.claude/
+**/__pycache__/
+*.ps1

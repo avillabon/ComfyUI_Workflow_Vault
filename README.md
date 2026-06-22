@@ -260,3 +260,10 @@ Before calling a build release-ready, test it in a live ComfyUI session:
 All vault data is plain files on disk, so it's easy to back up, move, or
 inspect. The bundled `sample_vault/` is just example data — your own entries
 live in whichever vault root you choose, separate from this extension.
+
+## License
+
+Released under the **GNU General Public License v3.0** (see [LICENSE](LICENSE)).
+You're free to use, study, modify, and share it; derivative works must remain
+open under the same license. GPL-3.0 is compatible with ComfyUI (itself
+GPL-3.0).

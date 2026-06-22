@@ -190,14 +190,20 @@ export function renderGlobalSettings(controller) {
       title: "Browse for a folder",
       onclick: async () => {
         locationBrowseBtn.disabled = true;
+        locationStatus.textContent = "";
         try {
           const res = await VaultAPI.browseFolder();
           if (res.path) {
             locationInput.value = res.path;
             markDirty();
           }
+          // res.path === null → the user cancelled the dialog; leave the field.
         } catch {
-          // silently ignore
+          // Server-side native picker (tkinter) is unavailable on common
+          // installs (e.g. the ComfyUI Windows portable build) and headless
+          // servers — fall back to manual entry instead of a dead button.
+          locationStatus.textContent =
+            "Folder picker isn't available on this ComfyUI install — type or paste the path, then click “Change…”.";
         } finally {
           locationBrowseBtn.disabled = false;
         }

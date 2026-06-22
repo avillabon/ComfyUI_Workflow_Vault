@@ -1,6 +1,6 @@
 [project]
 name = "comfy-workflow-vault"
-version = "1.0.0"
+version = "1.0.1"
 description = "A local, single-user workflow library inside ComfyUI: save workflows as structured entries with versions, example media, and Markdown docs, then browse, tag, search, and reopen them."
 license = { file = "LICENSE" }
 readme = "README.md"

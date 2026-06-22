@@ -8,7 +8,7 @@ import { buildCompareSlider } from "./vault_compare_slider.js";
 import { tagCountsFrom } from "./vault_tag_input.js";
 
 // App version (SemVer). Keep in sync with pyproject.toml; shown in the footer.
-export const VAULT_VERSION = "1.0.0";
+export const VAULT_VERSION = "1.0.1";
 export const AUTHOR_NAME = "Alex Villabón";
 export const AUTHOR_URL = "https://www.youtube.com/@alexvillabon";
 export const REPO_URL = "https://github.com/avillabon/ComfyUI_Workflow_Vault";
@@ -97,11 +97,19 @@ export function renderInitView(controller) {
       title: "Browse for a folder",
       onclick: async () => {
         browseBtn.disabled = true;
+        status.textContent = "";
         try {
           const res = await VaultAPI.browseFolder();
           if (res.path) input.value = res.path;
+          // res.path === null → the user cancelled the dialog; leave the field.
         } catch {
-          // silently ignore — user may have cancelled or tkinter unavailable
+          // The picker is a server-side native dialog (tkinter), which is
+          // absent on common installs — notably the ComfyUI Windows portable
+          // build ships no tkinter — and on headless/remote servers. Guide the
+          // user to type the path instead of leaving a dead button.
+          status.textContent =
+            "Folder picker isn't available on this ComfyUI install — type or paste the full folder path above, then click “Use this folder.”";
+          input.focus();
         } finally {
           browseBtn.disabled = false;
         }

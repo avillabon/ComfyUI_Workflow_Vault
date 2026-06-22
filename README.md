@@ -11,16 +11,28 @@ folder you choose on disk. No database, no account, no cloud sync.
 
 ## Installation
 
+### ComfyUI Manager (recommended)
+
+1. Open **ComfyUI Manager → Custom Nodes Manager** (the "Manager" button, then
+   "Custom Nodes Manager" / "Install Custom Nodes").
+2. Search for **Workflow Vault** and click **Install**.
+3. Restart ComfyUI.
+
+### Manual
+
 1. Copy (or clone) this folder into your ComfyUI `custom_nodes` directory, so
    you end up with `ComfyUI/custom_nodes/Comfy_Workflow_Vault/`.
 2. Restart ComfyUI.
-3. The backend uses the standard library plus `aiohttp` and `Pillow`, both
-   already bundled by ComfyUI. The only extra dependency is `imageio-ffmpeg`,
-   which ships a self-contained ffmpeg binary used to convert **videos** (for
-   thumbnails and compare images) into animated WebP previews — many setups
-   already have it (e.g. VideoHelperSuite depends on it). Everything degrades
-   gracefully: without Pillow, image compression is skipped; without ffmpeg, you
-   can still pick a still frame from a video.
+
+### Dependencies
+
+The backend uses the standard library plus `aiohttp` and `Pillow`, both already
+bundled by ComfyUI. The only extra dependency is `imageio-ffmpeg`, which ships a
+self-contained ffmpeg binary used to convert **videos** (for thumbnails and
+compare images) into animated WebP previews — many setups already have it (e.g.
+VideoHelperSuite depends on it). Everything degrades gracefully: without Pillow,
+image compression is skipped; without ffmpeg, you can still pick a still frame
+from a video.
 
 ## First run
 

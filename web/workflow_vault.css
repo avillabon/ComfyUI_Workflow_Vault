@@ -740,6 +740,7 @@
 .wv-breadcrumb {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 6px 0 14px;
   font-size: 20px;
@@ -761,6 +762,35 @@
 
 .wv-breadcrumb-sep {
   opacity: 0.5;
+}
+
+/* Active tag-filter chips on the breadcrumb line. The breadcrumb itself is
+   large (page-title sized), so chips set their own smaller scale. */
+.wv-tagchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--wv-accent-soft);
+  color: var(--wv-accent);
+  padding: 2px 4px 2px 10px;
+  border-radius: 999px;
+}
+
+.wv-tagchip-remove {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 5px;
+  border-radius: 50%;
+}
+
+.wv-tagchip-remove:hover {
+  background: rgba(255, 255, 255, 0.15);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -911,6 +941,62 @@
   display: flex;
   gap: 2px;
   visibility: hidden;
+}
+
+/* Tag filter facet --------------------------------------------------------- */
+
+/* Active tag rows tint their checkbox icon with the accent, like gentype. */
+.wv-tagfilter-row {
+  cursor: pointer;
+}
+
+.wv-tagfilter-row.wv-folder-row-active .wv-gentype-icon {
+  color: var(--wv-accent);
+}
+
+.wv-tagfilter-search-wrap {
+  padding: 0 4px;
+  margin: 8px 0 2px;
+}
+
+.wv-tagfilter-search {
+  width: 100%;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+/* Scale the list height with the window so larger screens show many more tags
+   before scrolling, while still stopping short of the pinned sidebar footer.
+   Floors at 300px on short windows; selected tags sort to the top so they stay
+   visible once the list does scroll. */
+.wv-tagfilter-list {
+  max-height: max(300px, calc(100vh - 480px));
+  overflow-y: auto;
+}
+
+.wv-tagfilter-empty {
+  font-size: 12px;
+  color: var(--wv-faint);
+  padding: 4px 10px;
+}
+
+/* "Clear" button in the Tags heading row (shown once a tag is selected).
+   Styled as the same compact bordered pill the old All/Any toggle used:
+   neutral at rest, accent-filled on hover (echoing its highlighted segment). */
+.wv-tagfilter-clear {
+  border: 1px solid var(--wv-border-strong);
+  border-radius: var(--wv-radius);
+  background: none;
+  color: var(--wv-muted);
+  font-size: 11px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+
+.wv-tagfilter-clear:hover {
+  background: var(--wv-accent);
+  border-color: var(--wv-accent);
+  color: var(--wv-accent-fg);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1268,6 +1354,21 @@
   padding: 2px 9px;
   font-size: 11px;
   color: #b7b9bf;
+}
+
+/* Card tag pills double as filter entry points. */
+.wv-tag-clickable {
+  cursor: pointer;
+}
+
+.wv-tag-clickable:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--wv-fg);
+}
+
+.wv-tag-active {
+  background: var(--wv-accent-soft);
+  color: var(--wv-accent);
 }
 
 .wv-card-footer {

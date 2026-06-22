@@ -50,9 +50,15 @@ example media already filled in. You can switch to your own folder later from
 - **Grid view** with search, status filter, Favorites and Show-archived
   toggles, sort controls (by name, created date, or last updated), and a
   **per-row density selector** (2, 3, or 4 columns) on the breadcrumb line.
-- **Sidebar** is a **Generation Type** filter (Image, Video, Audio, 3D Model,
-  LLM, API Nodes) with live counts. An entry can carry more than one type and
-  shows up under each.
+- **Sidebar filters** with live counts:
+  - **Generation Type** (Image, Video, Audio, 3D Model, LLM, API Nodes). An
+    entry can carry more than one type and shows up under each.
+  - **Tags** — a multi-select list of every tag in the vault, each with its
+    usage count. Pick several to narrow to entries that carry **all** of them
+    (combined with AND); selected tags float to the top, a **Filter tags…** box
+    finds a specific one in large vaults, and a **Clear** button drops the whole
+    selection. Active tags also appear as removable chips next to the title, and
+    tag pills on the grid cards are clickable to add/remove a filter.
 - **Favorites** — star any entry from the grid card or detail view; favorites
   pin to the top in "last updated" sort order.
 - **Grid cards** show the thumbnail, entry name, status, generation type
@@ -128,9 +134,9 @@ example media already filled in. You can switch to your own folder later from
   **favorites**, **generation type**, and full-text **search**. A workflow is
   multi-dimensional (e.g. Flux, portrait, upscaler, client-ready, heavy-vram), so
   tags fit it better than forcing a single folder "home."
-- **Tags** are added per entry in the Save wizard and the entry editor, and
-  managed vault-wide in **Settings → Organization** (rename, merge, delete across
-  all entries).
+- **Tags** are added per entry in the Save wizard and the entry editor, filtered
+  on from the **sidebar Tags facet** (multi-select, AND), and managed vault-wide
+  in **Settings → Organization** (rename, merge, delete across all entries).
 - **Legacy folders:** vaults created before folders were deprecated keep their
   folder data untouched. **Settings → Organization** shows a one-time conversion
   that turns folder-path names into plain tags (e.g. `Image / Cleanup` →

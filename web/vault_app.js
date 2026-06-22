@@ -17,7 +17,8 @@ export class VaultApp {
     this.selectedEntryId = null;
     this.selectedTab = "overview";
     this.settingsSection = "info"; // sub-section within the Settings tab
-    this.filters = { search: "", status: null, favoritesOnly: false, showArchived: undefined, generationType: null };
+    this.filters = { search: "", status: null, favoritesOnly: false, showArchived: undefined, generationType: null, tags: [] };
+    this.ui = {}; // transient view state that isn't a filter (e.g. tag-search query)
     this.isDirty = false;
     this.dirtySaveHandler = null;
     this.dirtyDiscardHandler = null;

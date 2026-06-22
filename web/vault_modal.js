@@ -5,9 +5,10 @@ import { el, formatDateOnly, showToast, confirmDialog, onActivate, toggleField }
 import { VaultAPI } from "./vault_api.js";
 import { openCurrentVersion } from "./vault_detail.js";
 import { buildCompareSlider } from "./vault_compare_slider.js";
+import { tagCountsFrom } from "./vault_tag_input.js";
 
 // Bump this on each edit to the current date (CalVer); shown in the footer.
-export const VAULT_VERSION = "2026.06.21";
+export const VAULT_VERSION = "2026.06.22";
 export const AUTHOR_NAME = "Alex Villabón";
 export const AUTHOR_URL = "https://www.youtube.com/@alexvillabon";
 export const REPO_URL = "https://github.com/avillabon/ComfyUI_Workflow_Vault";
@@ -304,6 +305,7 @@ export function renderGridBody(controller) {
 
   const sidebar = el("div", { className: "wv-sidebar" });
   renderGenerationTypeFilter(sidebar, controller);
+  renderTagFilter(sidebar, controller);
   sidebar.appendChild(renderSidebarFooter());
   body.appendChild(sidebar);
 
@@ -379,10 +381,139 @@ function renderGenerationTypeFilter(container, controller) {
   container.appendChild(list);
 }
 
+// Add or remove a tag from the active tag filter, then re-render. Shared by the
+// sidebar facet, the breadcrumb chips, and the clickable card tag pills.
+function toggleTagFilter(controller, tag) {
+  const tags = controller.filters.tags || [];
+  controller.filters.tags = tags.includes(tag) ? tags.filter((t) => t !== tag) : [...tags, tag];
+  controller.render();
+}
+
+// Sidebar tag facet: a multi-select list of every tag in the vault with usage
+// counts, mirroring the Generation Type filter. Adds the pieces tags need that
+// a single-select gen-type list doesn't: an All/Any match toggle (shown once
+// two or more tags are picked) and a local filter box for large vaults.
+function renderTagFilter(container, controller) {
+  const { state, filters } = controller;
+  const counts = tagCountsFrom(state.entries || []);
+  const selected = filters.tags || [];
+  // Selected tags float to the top (so they stay visible in the scroll area),
+  // then most-used first, then alphabetical.
+  const tags = Object.keys(counts).sort((a, b) => {
+    const sa = selected.includes(a);
+    const sb = selected.includes(b);
+    if (sa !== sb) return sa ? -1 : 1;
+    return counts[b] - counts[a] || a.localeCompare(b);
+  });
+
+  controller.ui = controller.ui || {};
+
+  const heading = el("div", { className: "wv-sidebar-heading-row wv-sidebar-section-gap" }, [
+    el("div", { className: "wv-sidebar-heading" }, ["Tags"]),
+  ]);
+  if (selected.length) {
+    const clear = () => {
+      controller.filters.tags = [];
+      controller.render();
+    };
+    heading.appendChild(
+      el(
+        "button",
+        { className: "wv-tagfilter-clear", type: "button", title: "Clear selected tags", onclick: clear },
+        ["Clear"]
+      )
+    );
+  }
+  container.appendChild(heading);
+
+  if (!tags.length) {
+    container.appendChild(el("div", { className: "wv-tagfilter-empty" }, ["No tags yet."]));
+    return;
+  }
+
+  const list = el("div", { className: "wv-folder-tree wv-tagfilter-list" });
+  const rows = [];
+  for (const tag of tags) {
+    const active = selected.includes(tag);
+    const toggle = () => toggleTagFilter(controller, tag);
+    const row = el(
+      "div",
+      {
+        className: `wv-folder-row wv-tagfilter-row${active ? " wv-folder-row-active" : ""}`,
+        role: "button",
+        tabindex: "0",
+        "aria-pressed": active ? "true" : "false",
+        onclick: toggle,
+        onkeydown: onActivate(toggle),
+      },
+      [
+        el("i", { className: `pi ${active ? "pi-check-square" : "pi-stop"} wv-gentype-icon` }),
+        el("span", { className: "wv-folder-label" }, [tag]),
+        el("span", { className: "wv-folder-count" }, [String(counts[tag])]),
+      ]
+    );
+    rows.push({ tag, row });
+  }
+
+  // Local filter box (no app re-render, so typing keeps focus): just hides rows
+  // that don't match. The query persists on controller.ui so it survives the
+  // re-render triggered by toggling a tag. Only worth showing for longer lists.
+  const applyQuery = () => {
+    const q = (controller.ui.tagQuery || "").trim().toLowerCase();
+    for (const { tag, row } of rows) {
+      row.style.display = !q || tag.includes(q) ? "" : "none";
+    }
+  };
+  if (tags.length > 8) {
+    const search = el("input", {
+      className: "wv-input wv-tagfilter-search",
+      type: "text",
+      placeholder: "Filter tags…",
+      "aria-label": "Filter tags",
+      value: controller.ui.tagQuery || "",
+    });
+    search.addEventListener("input", () => {
+      controller.ui.tagQuery = search.value;
+      applyQuery();
+    });
+    container.appendChild(el("div", { className: "wv-tagfilter-search-wrap" }, [search]));
+  }
+
+  for (const { row } of rows) list.appendChild(row);
+  container.appendChild(list);
+  applyQuery();
+}
+
 function renderBreadcrumb(controller) {
   const row = el("div", { className: "wv-breadcrumb" });
 
   row.appendChild(el("span", { className: "wv-breadcrumb-item wv-breadcrumb-active" }, ["All Workflows"]));
+
+  // Active tag filters show as removable chips after the page title, spaced by
+  // the breadcrumb's flex gap. Tags always combine with AND.
+  const selectedTags = controller.filters.tags || [];
+  selectedTags.forEach((tag, i) => {
+    if (i === 0) {
+      row.appendChild(el("span", { className: "wv-breadcrumb-sep" }, ["·"]));
+    }
+    const remove = () => toggleTagFilter(controller, tag);
+    row.appendChild(
+      el("span", { className: "wv-tagchip" }, [
+        el("span", { className: "wv-tagchip-label" }, [tag]),
+        el(
+          "button",
+          {
+            className: "wv-tagchip-remove",
+            type: "button",
+            title: `Remove tag ${tag}`,
+            "aria-label": `Remove tag ${tag}`,
+            onclick: remove,
+          },
+          ["×"]
+        ),
+      ])
+    );
+  });
 
   // Per-row (grid density) control lives on the breadcrumb line, pushed to the
   // right edge by a flexible spacer.
@@ -429,6 +560,17 @@ function filterEntries(controller) {
 
   if (filters.generationType) {
     entries = entries.filter((e) => (e.generation_types || []).includes(filters.generationType));
+  }
+
+  const tagFilters = filters.tags || [];
+  if (tagFilters.length) {
+    // Narrow to entries carrying every selected tag. Tags are stored normalized
+    // (lowercased) and the selected tags come straight from entry data, so a
+    // plain Set membership check is exact.
+    entries = entries.filter((e) => {
+      const have = new Set(e.tags || []);
+      return tagFilters.every((t) => have.has(t));
+    });
   }
 
   const search = (filters.search || "").trim().toLowerCase();
@@ -552,7 +694,37 @@ function renderCard(entry, controller) {
   }
 
   if (show("tags") && entry.tags && entry.tags.length) {
-    body.appendChild(el("div", { className: "wv-card-tags" }, entry.tags.map((t) => el("span", { className: "wv-tag" }, [t]))));
+    const activeTags = controller.filters.tags || [];
+    body.appendChild(
+      el(
+        "div",
+        { className: "wv-card-tags" },
+        entry.tags.map((t) => {
+          const active = activeTags.includes(t);
+          const toggle = (e) => {
+            e.stopPropagation(); // don't open the entry — just filter by the tag
+            toggleTagFilter(controller, t);
+          };
+          return el(
+            "span",
+            {
+              className: `wv-tag wv-tag-clickable${active ? " wv-tag-active" : ""}`,
+              role: "button",
+              tabindex: "0",
+              title: active ? `Remove tag filter: ${t}` : `Filter by tag: ${t}`,
+              onclick: toggle,
+              onkeydown: (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggle(e);
+                }
+              },
+            },
+            [t]
+          );
+        })
+      )
+    );
   }
 
   const versionCount = (entry.versions || []).length;
@@ -632,7 +804,9 @@ function renderEmptyState(controller) {
           className: "wv-btn",
           onclick: () => {
             const showArchived = controller.filters.showArchived;
-            controller.filters = { search: "", status: null, favoritesOnly: false, showArchived, generationType: null };
+            controller.filters = { search: "", status: null, favoritesOnly: false, showArchived, generationType: null, tags: [] };
+            controller.ui = controller.ui || {};
+            controller.ui.tagQuery = "";
             controller.render();
           },
         },

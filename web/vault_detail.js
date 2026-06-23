@@ -117,6 +117,16 @@ function renderOverviewTab(controller, entry) {
   return wrap;
 }
 
+// Filesystem-safe download filename from an entry name, mirroring the
+// backend's exporting.download_name() so .json and .zip exports stay consistent.
+function workflowDownloadName(name) {
+  const safe = String(name || "")
+    .trim()
+    .replace(/[^A-Za-z0-9_.-]+/g, "_")
+    .replace(/^[._]+|[._]+$/g, "");
+  return safe || "workflow";
+}
+
 function renderOverviewSummary(controller, entry) {
   const wrap = el("div", { className: "wv-overview-summary" });
 
@@ -223,6 +233,24 @@ function renderOverviewSummary(controller, entry) {
         { className: "wv-btn", href: VaultAPI.exportUrl(entry.id), download: "", title: "Download this entry as a .zip" },
         [el("i", { className: "pi pi-download" }), "Export (.zip)"]
       ),
+      entry.current_version_id
+        ? el(
+            "a",
+            {
+              className: "wv-btn",
+              href: VaultAPI.versionWorkflowUrl(entry.id, entry.current_version_id),
+              // The `download` attribute forces this same-origin response to be
+              // saved as the entry's name rather than the generic workflow.json.
+              download: `${workflowDownloadName(entry.name)}.json`,
+              title: "Download the workflow as a .json named after this entry",
+            },
+            [el("i", { className: "pi pi-download" }), "Export (.json)"]
+          )
+        : el(
+            "button",
+            { className: "wv-btn", disabled: true, title: "This entry has no saved workflow to export" },
+            [el("i", { className: "pi pi-download" }), "Export (.json)"]
+          ),
     ])
   );
 

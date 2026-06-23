@@ -112,6 +112,11 @@ export const VaultAPI = {
   getVersionWorkflow: (entryId, versionId) =>
     getJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/versions/${encodeURIComponent(versionId)}/workflow`),
 
+  versionWorkflowUrl: (entryId, versionId) => {
+    const route = `/workflow-vault/entries/${encodeURIComponent(entryId)}/versions/${encodeURIComponent(versionId)}/workflow`;
+    return typeof api.apiURL === "function" ? api.apiURL(route) : route;
+  },
+
   createExample: (entryId, formData, options) =>
     postForm(`/workflow-vault/entries/${encodeURIComponent(entryId)}/examples`, formData, options),
   updateExample: (entryId, exampleId, formData, options) =>

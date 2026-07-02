@@ -12,7 +12,7 @@
 
 import { el, clear, showToast } from "./vault_dom.js";
 import { makeThumbnailFile, captureVideoFrameFile } from "./vault_image.js";
-import { detectCanvasMedia, fetchCanvasFile } from "./vault_canvas_media.js";
+import { canvasAvailable, detectCanvasMedia, fetchCanvasFile } from "./vault_canvas_media.js";
 
 const IMAGE_EXTS = ["png", "jpg", "jpeg", "webp", "gif"];
 const VIDEO_EXTS = ["mp4", "mov", "webm"];
@@ -409,7 +409,7 @@ export function renderThumbnailField({ currentUrl = null, clearable = false, nou
   }
 
   const children = [zone, fileInput];
-  if (allowCanvasImport) {
+  if (allowCanvasImport && canvasAvailable()) {
     const importBtn = el(
       "button",
       { type: "button", className: "wv-btn-link wv-thumb-import", title: "Import from the current ComfyUI canvas" },

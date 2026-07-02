@@ -77,6 +77,12 @@ function isLoaderWidgetName(name) {
 // Scan the live graph. Returns a de-duped list of:
 //   { filename, subfolder, type, role, mediaType, url }
 // role: "input" | "output"; mediaType: "image" | "video" | "audio".
+// Whether a live graph exists at all. False in the standalone build, whose
+// scripts/app.js shim has no graph — used to hide the import buttons there.
+export function canvasAvailable() {
+  return !!app.graph;
+}
+
 export function detectCanvasMedia() {
   const nodes = app.graph?._nodes || app.graph?.nodes || [];
   const byKey = new Map();

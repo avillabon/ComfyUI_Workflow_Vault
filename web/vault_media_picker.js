@@ -10,7 +10,7 @@
 //     files are gathered before a single submit.
 
 import { el, clear, showToast, confirmDialog } from "./vault_dom.js";
-import { detectCanvasMedia, fetchCanvasFile } from "./vault_canvas_media.js";
+import { canvasAvailable, detectCanvasMedia, fetchCanvasFile } from "./vault_canvas_media.js";
 
 export const MEDIA_ACCEPT = ".png,.jpg,.jpeg,.webp,.gif,.mp4,.mov,.webm,.wav,.mp3,.m4a,.flac,.ogg";
 const MEDIA_EXTS = MEDIA_ACCEPT.split(",").map((e) => e.replace(".", "").trim());
@@ -342,7 +342,9 @@ export function renderMediaPicker({ accept = MEDIA_ACCEPT, onChange, preview = f
 
     wrap.classList.add("wv-media-picker-preview");
     wrap.appendChild(fileInput);
-    wrap.appendChild(el("div", { className: "wv-mp-toolbar" }, [buildImportButton()]));
+    if (canvasAvailable()) {
+      wrap.appendChild(el("div", { className: "wv-mp-toolbar" }, [buildImportButton()]));
+    }
     wrap.appendChild(inputsSection);
     wrap.appendChild(outputsSection);
     renderSections();

@@ -36,9 +36,7 @@ export function buildCompareSlider(entry) {
   const slider = makeEl("div", { className: "wv-compare-slider", "data-compare-slider": "" }, [
     after,
     makeEl("div", { className: "wv-compare-overlay", style: "clip-path:inset(0 50% 0 0);" }, [before]),
-    makeEl("div", { className: "wv-compare-handle", style: "left:50%;", "aria-hidden": "true" }, [
-      makeEl("div", { className: "wv-compare-grip" }, [makeEl("i", { className: "pi pi-arrows-h" })]),
-    ]),
+    makeEl("div", { className: "wv-compare-handle", style: "left:50%;", "aria-hidden": "true" }),
   ]);
   initCompareSlider(slider);
   return slider;

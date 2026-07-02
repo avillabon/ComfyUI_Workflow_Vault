@@ -286,11 +286,14 @@ function renderEntryMetadataForm(controller, entry) {
 
   const thumbField = renderThumbnailField({
     currentUrl: entry.thumbnail ? VaultAPI.mediaUrl(entry.id, entry.thumbnail, entry.updated_at) : null,
+    clearable: true,
+    allowCanvasImport: true,
   });
   const compareField = renderThumbnailField({
     currentUrl: entry.compare_image ? VaultAPI.mediaUrl(entry.id, entry.compare_image, entry.updated_at) : null,
     clearable: true,
     noun: "compare image",
+    allowCanvasImport: true,
   });
 
   function markDirty() {
@@ -361,6 +364,8 @@ function renderEntryMetadataForm(controller, entry) {
         formData.append("thumbnail", up.file);
         if (up.source) formData.append("thumbnail_source", up.source);
         data.file_mtimes = { thumbnail: up.mtime, thumbnail_source: up.mtime };
+      } else if (up?.clear) {
+        data.thumbnail_clear = true;
       }
       // Optional before/after compare overlay (same image/video picker): a
       // new asset, or an explicit removal (clear) of an existing one.
@@ -759,10 +764,7 @@ function renderCompareSlider(entry, inputItem, outputItem) {
   ]);
   const handle = el(
     "div",
-    { className: "wv-compare-handle", tabindex: "0", role: "slider", "aria-label": "Comparison position", "aria-valuemin": "0", "aria-valuemax": "100" },
-    // Wrap the icon in an absolutely-positioned grip (same as the thumbnail
-    // slider) so it isn't flex-shrunk by the thin handle bar into a flat oval.
-    [el("div", { className: "wv-compare-grip" }, [el("i", { className: "pi pi-arrows-h" })])]
+    { className: "wv-compare-handle", tabindex: "0", role: "slider", "aria-label": "Comparison position", "aria-valuemin": "0", "aria-valuemax": "100" }
   );
 
   wrap.appendChild(base);

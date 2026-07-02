@@ -1115,23 +1115,6 @@
   pointer-events: none;
 }
 
-.wv-compare-grip {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.95);
-  color: #333;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
-}
-
 /* Compact remove (×) button on the compare-image picker preview. */
 .wv-thumb-clear {
   position: absolute;
@@ -1965,6 +1948,69 @@
   text-decoration: underline;
 }
 
+.wv-btn-link:disabled {
+  opacity: 0.6;
+  cursor: default;
+  text-decoration: none;
+}
+
+/* "Import from workflow" affordances (thumbnail/compare fields + media picker) */
+.wv-mp-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+
+.wv-thumb-import {
+  align-self: center;
+  font-size: 11px;
+}
+
+/* Chooser overlay: pick one canvas image/video for a single-asset field */
+.wv-canvas-choose-dialog {
+  width: min(720px, 92vw);
+}
+
+.wv-canvas-choose-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.wv-canvas-choose-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  border: 1px solid var(--wv-border);
+  border-radius: var(--wv-radius);
+  overflow: hidden;
+  background: var(--wv-bg-alt);
+  cursor: pointer;
+  text-align: left;
+}
+
+.wv-canvas-choose-tile:hover {
+  border-color: var(--wv-accent);
+}
+
+.wv-canvas-choose-media {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  display: block;
+  background: var(--wv-bg);
+}
+
+.wv-canvas-choose-name {
+  padding: 2px 6px 6px;
+  font-size: 11px;
+  color: var(--wv-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---------------------------------------------------------------------- */
 /* Example media carousel + gallery                                       */
 /* ---------------------------------------------------------------------- */
@@ -2172,23 +2218,8 @@
   width: 2px;
   background: var(--wv-accent);
   transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   cursor: ew-resize;
   z-index: 3;
-}
-
-.wv-compare-handle i {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--wv-accent);
-  color: var(--wv-accent-fg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
 }
 
 .wv-compare-label {

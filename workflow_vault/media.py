@@ -244,6 +244,13 @@ def save_compare_image_source(vault_root, slug, data, filename, mtime=None):
     return f"thumbnails/{final_name}", None
 
 
+def remove_thumbnail(vault_root, slug):
+    """Delete any saved display thumbnail and its archived source."""
+    tdir = storage.thumbnails_dir(vault_root, slug)
+    _clear_prefixed(tdir, "cover.")
+    _clear_prefixed(tdir, "source.")
+
+
 def remove_compare_image(vault_root, slug):
     """Delete any saved compare overlay and its archived source."""
     tdir = storage.thumbnails_dir(vault_root, slug)

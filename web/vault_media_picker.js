@@ -10,6 +10,7 @@
 //     files are gathered before a single submit.
 
 import { el, clear, showToast, confirmDialog } from "./vault_dom.js";
+import { detectCanvasMedia, fetchCanvasFile } from "./vault_canvas_media.js";
 
 export const MEDIA_ACCEPT = ".png,.jpg,.jpeg,.webp,.gif,.mp4,.mov,.webm,.wav,.mp3,.m4a,.flac,.ogg";
 const MEDIA_EXTS = MEDIA_ACCEPT.split(",").map((e) => e.replace(".", "").trim());
@@ -283,6 +284,49 @@ export function renderMediaPicker({ accept = MEDIA_ACCEPT, onChange, preview = f
     renderSection(outputsGrid, "output");
   }
 
+  // Pull input + output media straight off the live ComfyUI canvas so the user
+  // doesn't re-pick files they just ran. Detected inputs land under Inputs,
+  // outputs under Outputs — then flow through the same add path as a manual pick.
+  async function importFromCanvas(btn) {
+    const items = detectCanvasMedia();
+    if (!items.length) {
+      showToast("No media found on the canvas — load or generate something first.", "info");
+      return;
+    }
+    const label = btn?.querySelector(".wv-mp-import-label");
+    const prevLabel = label?.textContent;
+    if (btn) btn.disabled = true;
+    if (label) label.textContent = "Importing…";
+    try {
+      const results = await Promise.allSettled(items.map((it) => fetchCanvasFile(it)));
+      const inputs = [];
+      const outputs = [];
+      let failed = 0;
+      results.forEach((res, i) => {
+        if (res.status === "fulfilled") (items[i].role === "input" ? inputs : outputs).push(res.value);
+        else failed++;
+      });
+      if (inputs.length) await addFiles(inputs, "input");
+      if (outputs.length) await addFiles(outputs, "output");
+      if (failed) showToast(`Couldn't import ${failed} canvas file${failed === 1 ? "" : "s"}.`, "warn");
+    } catch (e) {
+      showToast(`Import from workflow failed: ${e.message}`, "error");
+    } finally {
+      if (btn) btn.disabled = false;
+      if (label && prevLabel != null) label.textContent = prevLabel;
+    }
+  }
+
+  function buildImportButton() {
+    const btn = el(
+      "button",
+      { type: "button", className: "wv-btn-link wv-mp-import", title: "Import media from the current ComfyUI canvas" },
+      [el("i", { className: "pi pi-sitemap" }), el("span", { className: "wv-mp-import-label" }, ["Import from workflow"])]
+    );
+    btn.addEventListener("click", () => importFromCanvas(btn));
+    return btn;
+  }
+
   function buildPreviewLayout() {
     inputsGrid = el("div", { className: "wv-mp-grid" });
     outputsGrid = el("div", { className: "wv-mp-grid" });
@@ -298,6 +342,7 @@ export function renderMediaPicker({ accept = MEDIA_ACCEPT, onChange, preview = f
 
     wrap.classList.add("wv-media-picker-preview");
     wrap.appendChild(fileInput);
+    wrap.appendChild(el("div", { className: "wv-mp-toolbar" }, [buildImportButton()]));
     wrap.appendChild(inputsSection);
     wrap.appendChild(outputsSection);
     renderSections();

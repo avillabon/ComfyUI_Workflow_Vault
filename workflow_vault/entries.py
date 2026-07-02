@@ -228,6 +228,13 @@ def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None,
     """Returns (new_slug, error)."""
     new_slug = slug
 
+    # Validate everything up front so a bad payload can never leave partial
+    # changes on disk — in particular, the folder rename must not happen
+    # before every other check has passed (it runs last, once the update is
+    # known-good).
+    if "status" in data and data["status"] not in VALID_STATUSES:
+        return slug, "Invalid status."
+
     if "name" in data:
         new_name = (data["name"] or "").strip()
         if not new_name:
@@ -236,14 +243,11 @@ def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None,
             names, slugs = _all_names_and_slugs(vault_root, exclude_slug=slug)
             if new_name.lower() in names:
                 return slug, "An entry with this name already exists."
+            # The entry's own slug is not a collision — a new name that
+            # slugifies back to the current slug keeps the folder as-is.
+            slugs.discard(slug)
             base_slug = utils.slugify(new_name)
             new_slug = utils.unique_slug(base_slug, slugs) if base_slug in slugs else base_slug
-            if new_slug != slug:
-                old_dir = storage.entry_dir(vault_root, slug)
-                new_dir = storage.entry_dir(vault_root, new_slug)
-                if os.path.exists(new_dir):
-                    return slug, "A folder for this slug already exists on disk."
-                os.rename(old_dir, new_dir)
         manifest["name"] = new_name
         manifest["slug"] = new_slug
 
@@ -254,8 +258,6 @@ def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None,
         manifest["tags"] = normalize_tags(data["tags"])
 
     if "status" in data:
-        if data["status"] not in VALID_STATUSES:
-            return new_slug, "Invalid status."
         manifest["status"] = data["status"]
 
     if "generation_types" in data or "generation_type" in data:
@@ -269,17 +271,24 @@ def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None,
     # Folder assignments are no longer written (folders are deprecated). Any
     # existing manifest["folder_id"] is left untouched as legacy metadata.
 
+    # Media/notes writes target the current directory; the manifest's stored
+    # paths are entry-relative, so they survive the (possible) rename below.
     if thumbnail_file:
         rel, merr = media_mod.save_thumbnail(
-            vault_root, new_slug, thumbnail_file["bytes"], thumbnail_file["filename"], mtime=thumbnail_file.get("mtime")
+            vault_root, slug, thumbnail_file["bytes"], thumbnail_file["filename"], mtime=thumbnail_file.get("mtime")
         )
         if merr:
-            return new_slug, merr
+            return slug, merr
         manifest["thumbnail"] = rel
+    elif data.get("thumbnail_clear"):
+        media_mod.remove_thumbnail(vault_root, slug)
+        manifest["thumbnail"] = None
+        manifest["thumbnail_source"] = None
+        manifest["thumbnail_source_compressed"] = False
 
     if thumbnail_source_file:
         rel, src_compressed, merr = media_mod.save_thumbnail_source(
-            vault_root, new_slug, thumbnail_source_file["bytes"], thumbnail_source_file["filename"],
+            vault_root, slug, thumbnail_source_file["bytes"], thumbnail_source_file["filename"],
             mtime=thumbnail_source_file.get("mtime"), compress=_should_compress_source(vault_root)
         )
         if not merr:
@@ -289,26 +298,36 @@ def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None,
     # Compare overlay: a new asset replaces it; an explicit clear removes it.
     if compare_image_file:
         rel, merr = media_mod.save_compare_image(
-            vault_root, new_slug, compare_image_file["bytes"], compare_image_file["filename"], mtime=compare_image_file.get("mtime")
+            vault_root, slug, compare_image_file["bytes"], compare_image_file["filename"], mtime=compare_image_file.get("mtime")
         )
         if merr:
-            return new_slug, merr
+            return slug, merr
         manifest["compare_image"] = rel
         manifest["compare_image_source"] = None
         if compare_image_source_file:
             srel, serr = media_mod.save_compare_image_source(
-                vault_root, new_slug, compare_image_source_file["bytes"], compare_image_source_file["filename"],
+                vault_root, slug, compare_image_source_file["bytes"], compare_image_source_file["filename"],
                 mtime=compare_image_source_file.get("mtime"),
             )
             if not serr:
                 manifest["compare_image_source"] = srel
     elif data.get("compare_image_clear"):
-        media_mod.remove_compare_image(vault_root, new_slug)
+        media_mod.remove_compare_image(vault_root, slug)
         manifest["compare_image"] = None
         manifest["compare_image_source"] = None
 
     if "notes" in data:
-        storage.write_notes(vault_root, new_slug, normalize_notes(data["notes"]))
+        storage.write_notes(vault_root, slug, normalize_notes(data["notes"]))
+
+    # The folder rename runs last, after every other change has succeeded, so
+    # an earlier failure can never leave a renamed directory behind.
+    if new_slug != slug:
+        old_dir = storage.entry_dir(vault_root, slug)
+        new_dir = storage.entry_dir(vault_root, new_slug)
+        if os.path.exists(new_dir):
+            manifest["slug"] = slug  # keep the manifest consistent with the dir
+            return slug, "A folder for this slug already exists on disk."
+        os.rename(old_dir, new_dir)
 
     manifest["updated_at"] = utils.now_iso()
     storage.write_manifest(vault_root, new_slug, manifest)

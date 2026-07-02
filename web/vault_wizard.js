@@ -156,8 +156,8 @@ function renderCreateForm(controller) {
   );
   const genTypePicker = renderGenTypePicker([], () => { markDirty(); genErr.style.display = "none"; });
   const favSwitch = toggleField("Favorite", false, markDirty);
-  const thumbField = renderThumbnailField({ currentUrl: null });
-  const compareField = renderThumbnailField({ currentUrl: null, clearable: true, noun: "compare image" });
+  const thumbField = renderThumbnailField({ currentUrl: null, allowCanvasImport: true });
+  const compareField = renderThumbnailField({ currentUrl: null, clearable: true, noun: "compare image", allowCanvasImport: true });
 
   // --- Right column inputs: version + notes ---
   const customLabelInput = el("input", { className: "wv-input", type: "text", placeholder: "e.g. Initial version" });

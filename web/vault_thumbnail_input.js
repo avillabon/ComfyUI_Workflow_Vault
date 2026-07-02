@@ -12,6 +12,7 @@
 
 import { el, clear, showToast } from "./vault_dom.js";
 import { makeThumbnailFile, captureVideoFrameFile } from "./vault_image.js";
+import { detectCanvasMedia, fetchCanvasFile } from "./vault_canvas_media.js";
 
 const IMAGE_EXTS = ["png", "jpg", "jpeg", "webp", "gif"];
 const VIDEO_EXTS = ["mp4", "mov", "webm"];
@@ -30,9 +31,11 @@ function isVideoFile(file) {
 // A drag-and-drop image/video picker with an animated-vs-pick-a-frame fork for
 // videos. Used for both the entry thumbnail and the before/after compare
 // overlay — they share identical behavior. Options:
-//   clearable — show a × to remove an existing selection (compare overlay).
-//   noun      — wording for prompts/labels ("thumbnail" | "compare image").
-export function renderThumbnailField({ currentUrl = null, clearable = false, noun = "thumbnail" } = {}) {
+//   clearable        — show a × to remove an existing selection (compare overlay).
+//   noun             — wording for prompts/labels ("thumbnail" | "compare image").
+//   allowCanvasImport — show an "Import from workflow" button that pulls an
+//                       image/video straight off the live ComfyUI canvas.
+export function renderThumbnailField({ currentUrl = null, clearable = false, noun = "thumbnail", allowCanvasImport = false } = {}) {
   let objectUrl = null; // for image/video previews and frame picking
   // mode: "none" | "image" | "video-animated" | "video-frame"
   let mode = currentUrl ? "image" : "none";
@@ -327,7 +330,96 @@ export function renderThumbnailField({ currentUrl = null, clearable = false, nou
     fileInput.dispatchEvent(new Event("change", { bubbles: true }));
   });
 
-  const wrap = el("div", { className: "wv-thumb-field" }, [zone, fileInput]);
+  // --- Import from the live ComfyUI canvas -------------------------------
+  // Feed a File through the same path as a manual pick (validate + change),
+  // so images and the video animated/frame fork behave identically.
+  function injectFile(file) {
+    if (!validate(file)) return;
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    fileInput.files = dt.files;
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  async function useCanvasItem(item, btn) {
+    if (btn) btn.disabled = true;
+    try {
+      injectFile(await fetchCanvasFile(item));
+    } catch (e) {
+      showToast(`Import from workflow failed: ${e.message}`, "error");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // A thumbnail is a single asset, so when several media are on the canvas we
+  // let the user pick which one (vs. the media picker, which takes them all).
+  function openCanvasChooser(items) {
+    const overlay = el("div", { className: "wv-overlay wv-overlay-dialog" });
+    const cleanup = () => {
+      overlay.remove();
+      document.removeEventListener("keydown", onKey);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") cleanup();
+    };
+    const grid = el("div", { className: "wv-canvas-choose-grid" });
+    for (const item of items) {
+      const media =
+        item.mediaType === "video"
+          ? el("video", { src: item.url, className: "wv-canvas-choose-media", muted: true, loop: true, playsinline: true, autoplay: true })
+          : el("img", { src: item.url, className: "wv-canvas-choose-media", alt: item.filename });
+      grid.appendChild(
+        el(
+          "button",
+          {
+            type: "button",
+            className: "wv-canvas-choose-tile",
+            title: item.filename,
+            onclick: () => {
+              cleanup();
+              useCanvasItem(item);
+            },
+          },
+          [media, el("span", { className: "wv-canvas-choose-name" }, [item.filename])]
+        )
+      );
+    }
+    const box = el("div", { className: "wv-dialog wv-canvas-choose-dialog", role: "dialog", "aria-modal": "true", "aria-label": `Choose a ${noun} from the canvas` }, [
+      el("div", { className: "wv-dialog-title" }, [`Choose a ${noun} from the canvas`]),
+      el("div", { className: "wv-dialog-body" }, [grid]),
+      el("div", { className: "wv-dialog-footer" }, [el("button", { type: "button", className: "wv-btn", onclick: cleanup }, ["Cancel"])]),
+    ]);
+    overlay.appendChild(box);
+    overlay.addEventListener("mousedown", (e) => {
+      if (e.target === overlay) cleanup();
+    });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(overlay);
+  }
+
+  async function importFromCanvas(btn) {
+    const items = detectCanvasMedia().filter((it) => it.mediaType === "image" || it.mediaType === "video");
+    if (!items.length) {
+      showToast(`No image or video found on the canvas to use as a ${noun}.`, "info");
+      return;
+    }
+    if (items.length === 1) return useCanvasItem(items[0], btn);
+    openCanvasChooser(items);
+  }
+
+  const children = [zone, fileInput];
+  if (allowCanvasImport) {
+    const importBtn = el(
+      "button",
+      { type: "button", className: "wv-btn-link wv-thumb-import", title: "Import from the current ComfyUI canvas" },
+      [el("i", { className: "pi pi-sitemap" }), el("span", {}, ["Import from workflow"])]
+    );
+    importBtn.addEventListener("click", () => importFromCanvas(importBtn));
+    children.push(importBtn);
+  }
+
+  const wrap = el("div", { className: "wv-thumb-field" }, children);
   wrap.fileInput = fileInput;
 
   // Builds the upload parts for the current selection.

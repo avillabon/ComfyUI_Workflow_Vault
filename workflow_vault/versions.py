@@ -78,6 +78,12 @@ def _find_version(vault_root, slug, version_id):
     return None
 
 
+def _workflow_filename(version):
+    """The version's workflow file name. basename() keeps a hand-edited
+    version.json from pointing reads/writes outside the version folder."""
+    return os.path.basename(version.get("workflow_file") or "") or "workflow.json"
+
+
 def overwrite_version(vault_root, manifest, slug, version_id, workflow, notes=None):
     if workflow is None:
         return None, "Workflow JSON snapshot is required."
@@ -86,7 +92,7 @@ def overwrite_version(vault_root, manifest, slug, version_id, workflow, notes=No
         return None, "Version not found."
 
     vdir = storage.version_dir(vault_root, slug, version["dir"])
-    utils.atomic_write_json(os.path.join(vdir, "workflow.json"), workflow)
+    utils.atomic_write_json(os.path.join(vdir, _workflow_filename(version)), workflow)
 
     now = utils.now_iso()
     version["updated_at"] = now
@@ -127,7 +133,7 @@ def get_version_workflow(vault_root, slug, version_id):
     if not version:
         return None, "Version not found."
     vdir = storage.version_dir(vault_root, slug, version["dir"])
-    workflow = utils.read_json(os.path.join(vdir, "workflow.json"))
+    workflow = utils.read_json(os.path.join(vdir, _workflow_filename(version)))
     if workflow is None:
         return None, "Workflow file is missing."
     return workflow, None

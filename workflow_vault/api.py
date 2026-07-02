@@ -138,6 +138,8 @@ async def _read_part_limited(part, request_total=None):
 
 
 def _collect_indexed_files(files, prefix, labels=None):
+    if not isinstance(labels, list):
+        labels = None
     result = []
     i = 0
     while f"{prefix}{i}" in files:
@@ -196,6 +198,15 @@ async def post_settings(request):
     body, err = await _read_json(request)
     if err:
         return err
+    # save_vault_settings is a read-modify-write of vault_settings.json;
+    # serialize it like every other mutating route so concurrent saves (two
+    # tabs, or rapid-fire UI toggles) don't drop updates.
+    target_root = (body.get("vault_root") or "").strip() if "vault_root" in body else config.get_vault_root()
+    async with _write_lock(target_root):
+        return _apply_settings(body)
+
+
+def _apply_settings(body):
     vault_root = None
 
     if "vault_root" in body:
@@ -319,7 +330,10 @@ async def post_create_entry(request):
     if "compare_image_source" in files:
         data["compare_image_source"] = files["compare_image_source"]
 
-    for i, example in enumerate(data.get("examples") or []):
+    examples_in = data.get("examples") or []
+    if not isinstance(examples_in, list) or not all(isinstance(e, dict) for e in examples_in):
+        return _error("'examples' must be a list of JSON objects.")
+    for i, example in enumerate(examples_in):
         example["input_files"] = _collect_indexed_files(files, f"example_{i}_input_", example.get("input_labels"))
         example["output_files"] = _collect_indexed_files(files, f"example_{i}_output_", example.get("output_labels"))
 
@@ -799,6 +813,13 @@ async def post_update_example(request):
         data, files = await _parse_multipart(request)
     except _MultipartError as e:
         return _error(str(e))
+    # Malformed specs would read as "keep nothing" and delete the example's
+    # media, so reject them outright.
+    for key in ("inputs", "outputs"):
+        if key in data:
+            specs = data[key]
+            if not isinstance(specs, list) or not all(isinstance(s, dict) for s in specs):
+                return _error(f"'{key}' must be a list of JSON objects.")
     new_input_files = _collect_indexed_files(files, "new_input_", data.get("new_input_labels"))
     new_output_files = _collect_indexed_files(files, "new_output_", data.get("new_output_labels"))
 

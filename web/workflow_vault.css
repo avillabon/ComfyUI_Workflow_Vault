@@ -1097,10 +1097,14 @@
   pointer-events: none;
 }
 
+/* Overlay + divider line shared by BOTH compare sliders: the grid/overview
+   hover slider (.wv-compare-slider) and the examples slider (.wv-compare).
+   Container-specific styling stays on those two wrappers. */
 .wv-compare-overlay {
   position: absolute;
   inset: 0;
   overflow: hidden;
+  clip-path: inset(0 50% 0 0);
   will-change: clip-path;
 }
 
@@ -1108,11 +1112,13 @@
   position: absolute;
   top: 0;
   bottom: 0;
+  left: 50%;
   width: 2px;
-  margin-left: -1px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--wv-accent);
+  transform: translateX(-50%);
   box-shadow: 0 0 6px rgba(0, 0, 0, 0.5);
   pointer-events: none;
+  z-index: 3;
 }
 
 /* Compact remove (×) button on the compare-image picker preview. */
@@ -2204,24 +2210,8 @@
   pointer-events: none;
 }
 
-.wv-compare-overlay {
-  position: absolute;
-  inset: 0;
-  clip-path: inset(0 50% 0 0);
-}
-
-.wv-compare-handle {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 2px;
-  background: var(--wv-accent);
-  transform: translateX(-50%);
-  cursor: ew-resize;
-  z-index: 3;
-}
-
+/* .wv-compare-overlay / .wv-compare-handle are shared with the grid slider —
+   defined once next to .wv-compare-slider above. */
 .wv-compare-label {
   position: absolute;
   bottom: 8px;

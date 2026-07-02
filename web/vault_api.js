@@ -45,6 +45,10 @@ function postFormWithProgress(route, formData, onProgress) {
     const url = typeof api.apiURL === "function" ? api.apiURL(route) : route;
     xhr.open("POST", url, true);
     xhr.responseType = "text";
+    // api.fetchApi attaches the ComfyUI user header to every request; this
+    // XHR path bypasses fetchApi (for upload progress), so mirror it here or
+    // uploads fail under the multi-user/auth setup.
+    if (api.user != null) xhr.setRequestHeader("Comfy-User", api.user);
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) {
         onProgress({ phase: "upload", loaded: event.loaded, total: event.total, percent: Math.round((event.loaded / event.total) * 100) });

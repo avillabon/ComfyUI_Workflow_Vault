@@ -6,13 +6,16 @@ import { app } from "../../scripts/app.js";
 import { el, clear, applyAccentColor } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
 import { vaultApp } from "./vault_app.js";
+import { VAULT_VERSION } from "./vault_modal.js";
 
 function injectStylesheet() {
   if (document.getElementById("wv-styles")) return;
   const link = document.createElement("link");
   link.id = "wv-styles";
   link.rel = "stylesheet";
-  link.href = new URL("./workflow_vault.css", import.meta.url).href;
+  // Version param busts stale browser caches after an update (Edge in
+  // particular has served old CSS across extension updates).
+  link.href = new URL(`./workflow_vault.css?v=${VAULT_VERSION}`, import.meta.url).href;
   document.head.appendChild(link);
 }
 

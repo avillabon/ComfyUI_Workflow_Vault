@@ -43,6 +43,11 @@ export class VaultApp {
       this.view = "wizard";
     }
     this.render();
+    // Move focus into the dialog unless a view already claimed it (the init
+    // screen and the search box focus themselves).
+    if (this.overlay && !this.overlay.contains(document.activeElement)) {
+      this.overlay.querySelector(".wv-modal")?.focus();
+    }
   }
 
   _onKeyDown(e) {
@@ -50,6 +55,34 @@ export class VaultApp {
     if (e.key === "Escape") {
       this.requestClose();
       return;
+    }
+    if (e.key === "Tab") this._trapFocus(e);
+  }
+
+  // Keep Tab inside the overlay. Without this the tab order walks straight out
+  // of the modal and into the ComfyUI canvas behind it — controls the user
+  // can't see and shouldn't reach while the vault is open.
+  _trapFocus(e) {
+    if (!this.overlay) return;
+    const candidates = this.overlay.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    // getClientRects() rather than offsetParent: the modal is positioned, and
+    // offsetParent is null for fixed elements even when they're visible.
+    const focusable = [...candidates].filter((node) => node.getClientRects().length > 0);
+    if (!focusable.length) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!this.overlay.contains(document.activeElement)) {
+      e.preventDefault();
+      first.focus();
+    } else if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
     }
   }
 
@@ -236,7 +269,15 @@ export class VaultApp {
     }
 
     clear(this.overlay);
-    const modal = el("div", { className: "wv-modal" });
+    // Announced as a modal dialog, and focusable so open() can move focus into
+    // it (aria-modal without that leaves a screen reader outside the dialog).
+    const modal = el("div", {
+      className: "wv-modal",
+      role: "dialog",
+      "aria-modal": "true",
+      "aria-label": "Workflow Vault",
+      tabindex: "-1",
+    });
 
     if (!this.state) {
       modal.appendChild(renderLoading());

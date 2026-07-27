@@ -1,9 +1,11 @@
 """REST-style backend endpoints for the Workflow Vault extension."""
 
 import asyncio
+import functools
 import json
 import os
 import re
+from urllib.parse import urlsplit
 
 from aiohttp import web
 from server import PromptServer
@@ -30,6 +32,67 @@ _WRITE_LOCKS = {}
 
 def _error(message, status=400):
     return web.json_response({"error": message}, status=status)
+
+
+# ---------------------------------------------------------------------------
+# Cross-site request protection
+# ---------------------------------------------------------------------------
+#
+# ComfyUI ships no CSRF protection, and several vault endpoints accept
+# multipart/form-data — a request type any web page can submit cross-origin
+# with no preflight to stop it. The JSON endpoints are no safer: aiohttp's
+# request.json() parses the body regardless of Content-Type, so a plain
+# text/plain form post reaches them too.
+#
+# Unguarded, a page the user happens to be browsing could repoint the vault
+# root at any writable directory, delete entries, or pop a native folder
+# dialog on their desktop. Every mutating route therefore goes through _post()
+# below rather than routes.post() directly.
+
+def _is_same_origin(request):
+    """True when a request demonstrably did not originate from another site.
+
+    Two independent browser-set signals, neither forgeable by page script:
+
+    - ``Sec-Fetch-Site`` is sent by every current browser. Only "same-origin"
+      and "none" (direct navigation) are accepted; "same-site" is refused too,
+      since ports don't distinguish sites and another local server would
+      otherwise qualify.
+    - ``Origin`` is sent on every browser POST, cross-origin form submissions
+      included, and is compared against the host the request was addressed to.
+
+    A request carrying neither header is allowed: that's a non-browser client
+    (curl, a script), and a browser-driven CSRF attack cannot produce one.
+    """
+    fetch_site = request.headers.get("Sec-Fetch-Site")
+    if fetch_site and fetch_site not in ("same-origin", "none"):
+        return False
+
+    origin = request.headers.get("Origin")
+    if not origin:
+        return True
+    # Rejects "null" (sandboxed iframes, file://) along with any real mismatch,
+    # since urlsplit gives it an empty netloc.
+    return urlsplit(origin).netloc == request.host
+
+
+def _guard_csrf(handler):
+    @functools.wraps(handler)
+    async def wrapped(request):
+        if not _is_same_origin(request):
+            return _error("Blocked: this request appears to come from another site.", 403)
+        return await handler(request)
+
+    return wrapped
+
+
+def _post(path):
+    """Register a CSRF-guarded POST route. Mutating endpoints use this instead
+    of routes.post() so the check can never be forgotten on a new route."""
+    def decorator(handler):
+        return routes.post(path)(_guard_csrf(handler))
+
+    return decorator
 
 
 async def _read_json(request):
@@ -193,7 +256,7 @@ async def get_settings(request):
     })
 
 
-@routes.post("/workflow-vault/settings")
+@_post("/workflow-vault/settings")
 async def post_settings(request):
     body, err = await _read_json(request)
     if err:
@@ -287,7 +350,7 @@ def _apply_settings(body):
     })
 
 
-@routes.post("/workflow-vault/initialize")
+@_post("/workflow-vault/initialize")
 async def post_initialize(request):
     body, err = await _read_json(request)
     if err:
@@ -310,7 +373,7 @@ async def post_initialize(request):
 # Entries
 # ---------------------------------------------------------------------------
 
-@routes.post("/workflow-vault/entries")
+@_post("/workflow-vault/entries")
 async def post_create_entry(request):
     vault_root, err = _require_vault()
     if err:
@@ -344,7 +407,7 @@ async def post_create_entry(request):
         return web.json_response(entry)
 
 
-@routes.post("/workflow-vault/entries/{entry_id}/metadata")
+@_post("/workflow-vault/entries/{entry_id}/metadata")
 async def post_entry_metadata(request):
     vault_root, err = _require_vault()
     if err:
@@ -359,17 +422,20 @@ async def post_entry_metadata(request):
         slug, manifest, err = _require_entry(vault_root, entry_id)
         if err:
             return err
-        new_slug, err_msg = entries.update_entry_metadata(
+        new_slug, err_msg, warnings = entries.update_entry_metadata(
             vault_root, manifest, slug, data, files.get("thumbnail"), files.get("thumbnail_source"),
             compare_image_file=files.get("compare_image"),
             compare_image_source_file=files.get("compare_image_source"),
         )
         if err_msg:
             return _error(err_msg)
-        return web.json_response(storage.build_entry_state(vault_root, new_slug))
+        state = storage.build_entry_state(vault_root, new_slug)
+        if warnings:
+            state["warnings"] = warnings
+        return web.json_response(state)
 
 
-@routes.post("/workflow-vault/entries/{entry_id}/archive")
+@_post("/workflow-vault/entries/{entry_id}/archive")
 async def post_archive_entry(request):
     vault_root, err = _require_vault()
     if err:
@@ -394,7 +460,7 @@ async def post_archive_entry(request):
         return web.json_response(storage.build_entry_state(vault_root, slug))
 
 
-@routes.post("/workflow-vault/entries/{entry_id}/duplicate")
+@_post("/workflow-vault/entries/{entry_id}/duplicate")
 async def post_duplicate_entry(request):
     """Clone an entry into a new one under a user-supplied unique name, keeping
     only the source's current version. File copying runs off the event loop."""
@@ -420,7 +486,7 @@ async def post_duplicate_entry(request):
         return web.json_response(state)
 
 
-@routes.post("/workflow-vault/entries/{entry_id}/delete")
+@_post("/workflow-vault/entries/{entry_id}/delete")
 async def post_delete_entry(request):
     """Delete a whole entry from the vault, sending its folder to the Recycle
     Bin where supported. CPU/IO work runs off the event loop."""
@@ -501,7 +567,7 @@ async def get_health(request):
     return web.json_response(data)
 
 
-@routes.post("/workflow-vault/health/cleanup-staging")
+@_post("/workflow-vault/health/cleanup-staging")
 async def post_cleanup_staging(request):
     vault_root, err = _require_vault()
     if err:
@@ -522,7 +588,7 @@ async def get_export_vault(request):
     return await _stream_zip_response(request, zip_path, f"{exporting.download_name(arc_root, 'vault')}.zip")
 
 
-@routes.post("/workflow-vault/entries/{entry_id}/reveal-media")
+@_post("/workflow-vault/entries/{entry_id}/reveal-media")
 async def post_reveal_media(request):
     vault_root, err = _require_vault()
     if err:
@@ -544,7 +610,7 @@ async def post_reveal_media(request):
     return web.json_response({"ok": True})
 
 
-@routes.post("/workflow-vault/entries/{entry_id}/open-folder")
+@_post("/workflow-vault/entries/{entry_id}/open-folder")
 async def post_open_entry_folder(request):
     vault_root, err = _require_vault()
     if err:
@@ -559,7 +625,7 @@ async def post_open_entry_folder(request):
     return web.json_response({"ok": True})
 
 
-@routes.post("/workflow-vault/browse-folder")
+@_post("/workflow-vault/browse-folder")
 async def post_browse_folder(request):
     """Open a native OS folder-picker dialog and return the chosen path.
 
@@ -586,7 +652,7 @@ async def post_browse_folder(request):
     return web.json_response({"ok": True, "path": chosen})
 
 
-@routes.post("/workflow-vault/compress-examples")
+@_post("/workflow-vault/compress-examples")
 async def post_compress_examples(request):
     """Batch-compress every existing example image across the vault."""
     vault_root, err = _require_vault()
@@ -615,7 +681,7 @@ async def post_compress_examples(request):
 # Versions
 # ---------------------------------------------------------------------------
 
-@routes.post("/workflow-vault/entries/{entry_id}/versions")
+@_post("/workflow-vault/entries/{entry_id}/versions")
 async def post_create_version(request):
     vault_root, err = _require_vault()
     if err:
@@ -645,7 +711,7 @@ async def post_create_version(request):
         return web.json_response(storage.build_entry_state(vault_root, slug))
 
 
-@routes.post("/workflow-vault/entries/{entry_id}/versions/{version_id}/overwrite")
+@_post("/workflow-vault/entries/{entry_id}/versions/{version_id}/overwrite")
 async def post_overwrite_version(request):
     vault_root, err = _require_vault()
     if err:
@@ -671,7 +737,7 @@ async def post_overwrite_version(request):
         return web.json_response(storage.build_entry_state(vault_root, slug))
 
 
-@routes.post("/workflow-vault/entries/{entry_id}/versions/{version_id}/promote")
+@_post("/workflow-vault/entries/{entry_id}/versions/{version_id}/promote")
 async def post_promote_version(request):
     vault_root, err = _require_vault()
     if err:
@@ -693,7 +759,7 @@ async def post_promote_version(request):
         return web.json_response(storage.build_entry_state(vault_root, slug))
 
 
-@routes.post("/workflow-vault/entries/{entry_id}/versions/{version_id}")
+@_post("/workflow-vault/entries/{entry_id}/versions/{version_id}")
 async def post_update_version(request):
     vault_root, err = _require_vault()
     if err:
@@ -739,7 +805,7 @@ async def get_version_workflow(request):
 # Examples
 # ---------------------------------------------------------------------------
 
-@routes.post("/workflow-vault/entries/{entry_id}/examples")
+@_post("/workflow-vault/entries/{entry_id}/examples")
 async def post_create_example(request):
     vault_root, err = _require_vault()
     if err:
@@ -770,7 +836,7 @@ async def post_create_example(request):
         return web.json_response(state)
 
 
-@routes.post("/workflow-vault/entries/{entry_id}/examples/reorder")
+@_post("/workflow-vault/entries/{entry_id}/examples/reorder")
 async def post_reorder_examples(request):
     vault_root, err = _require_vault()
     if err:
@@ -798,7 +864,7 @@ async def post_reorder_examples(request):
         return web.json_response(storage.build_entry_state(vault_root, slug))
 
 
-@routes.post("/workflow-vault/entries/{entry_id}/examples/{example_id}")
+@_post("/workflow-vault/entries/{entry_id}/examples/{example_id}")
 async def post_update_example(request):
     vault_root, err = _require_vault()
     if err:
@@ -838,7 +904,7 @@ async def post_update_example(request):
         return web.json_response(state)
 
 
-@routes.post("/workflow-vault/entries/{entry_id}/examples/{example_id}/delete")
+@_post("/workflow-vault/entries/{entry_id}/examples/{example_id}/delete")
 async def post_delete_example(request):
     vault_root, err = _require_vault()
     if err:
@@ -864,7 +930,7 @@ async def post_delete_example(request):
 # Folders
 # ---------------------------------------------------------------------------
 
-@routes.post("/workflow-vault/folders")
+@_post("/workflow-vault/folders")
 async def post_create_folder(request):
     vault_root, err = _require_vault()
     if err:
@@ -879,7 +945,7 @@ async def post_create_folder(request):
         return web.json_response({"folder": folder, "folders": storage.read_folders(vault_root)})
 
 
-@routes.post("/workflow-vault/folders/{folder_id}")
+@_post("/workflow-vault/folders/{folder_id}")
 async def post_update_folder(request):
     vault_root, err = _require_vault()
     if err:
@@ -902,7 +968,7 @@ async def post_update_folder(request):
         return web.json_response({"folder": folder, "folders": storage.read_folders(vault_root)})
 
 
-@routes.post("/workflow-vault/folders/{folder_id}/delete")
+@_post("/workflow-vault/folders/{folder_id}/delete")
 async def post_delete_folder(request):
     vault_root, err = _require_vault()
     if err:
@@ -920,7 +986,7 @@ async def post_delete_folder(request):
 # Tags (vault-wide)
 # ---------------------------------------------------------------------------
 
-@routes.post("/workflow-vault/tags/rename")
+@_post("/workflow-vault/tags/rename")
 async def post_rename_tag(request):
     vault_root, err = _require_vault()
     if err:
@@ -935,7 +1001,7 @@ async def post_rename_tag(request):
         return web.json_response({"updated": count, **_full_state(vault_root)})
 
 
-@routes.post("/workflow-vault/tags/delete")
+@_post("/workflow-vault/tags/delete")
 async def post_delete_tag(request):
     vault_root, err = _require_vault()
     if err:
@@ -950,7 +1016,7 @@ async def post_delete_tag(request):
         return web.json_response({"updated": count, **_full_state(vault_root)})
 
 
-@routes.post("/workflow-vault/convert-folders-to-tags")
+@_post("/workflow-vault/convert-folders-to-tags")
 async def post_convert_folders_to_tags(request):
     """Explicit one-time migration of legacy folder paths into plain tags.
 

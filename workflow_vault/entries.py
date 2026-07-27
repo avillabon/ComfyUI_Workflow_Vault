@@ -139,6 +139,11 @@ def create_entry(vault_root, data):
         "updated_at": now,
     }
 
+    # Best-effort media (archival originals, the compare overlay) must never
+    # discard an otherwise-good entry — but the user has to be told when one
+    # was dropped, or they lose a file and are shown a plain success message.
+    warnings = []
+
     try:
         notes = normalize_notes(data.get("notes"))
         if notes:
@@ -174,7 +179,9 @@ def create_entry(vault_root, data):
                 vault_root, staging_slug, thumbnail_source["bytes"], thumbnail_source["filename"],
                 mtime=thumbnail_source.get("mtime"), compress=_should_compress_source(vault_root)
             )
-            if not merr:
+            if merr:
+                warnings.append(f"The full-resolution thumbnail original was not saved: {merr}")
+            else:
                 manifest["thumbnail_source"] = rel
                 manifest["thumbnail_source_compressed"] = src_compressed
 
@@ -184,7 +191,9 @@ def create_entry(vault_root, data):
             rel, merr = media_mod.save_compare_image(
                 vault_root, staging_slug, compare_image["bytes"], compare_image["filename"], mtime=compare_image.get("mtime")
             )
-            if not merr:
+            if merr:
+                warnings.append(f"The compare image was not saved: {merr}")
+            else:
                 manifest["compare_image"] = rel
             compare_image_source = data.get("compare_image_source")
             if not merr and compare_image_source:
@@ -192,7 +201,9 @@ def create_entry(vault_root, data):
                     vault_root, staging_slug, compare_image_source["bytes"], compare_image_source["filename"],
                     mtime=compare_image_source.get("mtime"),
                 )
-                if not serr:
+                if serr:
+                    warnings.append(f"The compare image original was not saved: {serr}")
+                else:
                     manifest["compare_image_source"] = srel
 
         skipped_files = []
@@ -221,28 +232,35 @@ def create_entry(vault_root, data):
     entry_state = storage.build_entry_state(vault_root, slug)
     if skipped_files:
         entry_state["skipped_files"] = skipped_files
+    if warnings:
+        entry_state["warnings"] = warnings
     return entry_state, None
 
 
 def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None, thumbnail_source_file=None, compare_image_file=None, compare_image_source_file=None):
-    """Returns (new_slug, error)."""
+    """Returns (new_slug, error, warnings).
+
+    `warnings` carries best-effort media that could not be saved. Those are not
+    errors — the rest of the update still applies — but they must reach the user
+    rather than being reported as an unqualified success."""
     new_slug = slug
+    warnings = []
 
     # Validate everything up front so a bad payload can never leave partial
     # changes on disk — in particular, the folder rename must not happen
     # before every other check has passed (it runs last, once the update is
     # known-good).
     if "status" in data and data["status"] not in VALID_STATUSES:
-        return slug, "Invalid status."
+        return slug, "Invalid status.", warnings
 
     if "name" in data:
         new_name = (data["name"] or "").strip()
         if not new_name:
-            return slug, "Name is required."
+            return slug, "Name is required.", warnings
         if new_name.lower() != (manifest.get("name") or "").strip().lower():
             names, slugs = _all_names_and_slugs(vault_root, exclude_slug=slug)
             if new_name.lower() in names:
-                return slug, "An entry with this name already exists."
+                return slug, "An entry with this name already exists.", warnings
             # The entry's own slug is not a collision — a new name that
             # slugifies back to the current slug keeps the folder as-is.
             slugs.discard(slug)
@@ -278,7 +296,7 @@ def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None,
             vault_root, slug, thumbnail_file["bytes"], thumbnail_file["filename"], mtime=thumbnail_file.get("mtime")
         )
         if merr:
-            return slug, merr
+            return slug, merr, warnings
         manifest["thumbnail"] = rel
     elif data.get("thumbnail_clear"):
         media_mod.remove_thumbnail(vault_root, slug)
@@ -291,7 +309,9 @@ def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None,
             vault_root, slug, thumbnail_source_file["bytes"], thumbnail_source_file["filename"],
             mtime=thumbnail_source_file.get("mtime"), compress=_should_compress_source(vault_root)
         )
-        if not merr:
+        if merr:
+            warnings.append(f"The full-resolution thumbnail original was not saved: {merr}")
+        else:
             manifest["thumbnail_source"] = rel
             manifest["thumbnail_source_compressed"] = src_compressed
 
@@ -301,7 +321,7 @@ def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None,
             vault_root, slug, compare_image_file["bytes"], compare_image_file["filename"], mtime=compare_image_file.get("mtime")
         )
         if merr:
-            return slug, merr
+            return slug, merr, warnings
         manifest["compare_image"] = rel
         manifest["compare_image_source"] = None
         if compare_image_source_file:
@@ -309,7 +329,9 @@ def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None,
                 vault_root, slug, compare_image_source_file["bytes"], compare_image_source_file["filename"],
                 mtime=compare_image_source_file.get("mtime"),
             )
-            if not serr:
+            if serr:
+                warnings.append(f"The compare image original was not saved: {serr}")
+            else:
                 manifest["compare_image_source"] = srel
     elif data.get("compare_image_clear"):
         media_mod.remove_compare_image(vault_root, slug)
@@ -326,12 +348,12 @@ def update_entry_metadata(vault_root, manifest, slug, data, thumbnail_file=None,
         new_dir = storage.entry_dir(vault_root, new_slug)
         if os.path.exists(new_dir):
             manifest["slug"] = slug  # keep the manifest consistent with the dir
-            return slug, "A folder for this slug already exists on disk."
+            return slug, "A folder for this slug already exists on disk.", warnings
         os.rename(old_dir, new_dir)
 
     manifest["updated_at"] = utils.now_iso()
     storage.write_manifest(vault_root, new_slug, manifest)
-    return new_slug, None
+    return new_slug, None, warnings
 
 
 def set_archived(vault_root, manifest, slug, archived, restore_status=None):
@@ -523,6 +545,11 @@ def compress_all_thumbnail_sources(vault_root):
 # Vault-wide tag operations
 # ---------------------------------------------------------------------------
 
+# A vault-wide tag operation is library hygiene, not a change to any workflow,
+# so neither of the functions below touches `updated_at`. Bumping it would
+# restamp every affected entry and reshuffle the default "Recently updated"
+# ordering — renaming a typo'd tag would silently reorder the whole grid.
+
 def rename_tag(vault_root, old, new):
     """Rename a tag across every entry. If `new` already exists on an entry,
     the two are merged (de-duplicated). Returns (updated_count, error)."""
@@ -542,7 +569,6 @@ def rename_tag(vault_root, old, new):
         if old not in tags:
             continue
         manifest["tags"] = normalize_tags([new if t == old else t for t in tags])
-        manifest["updated_at"] = utils.now_iso()
         storage.write_manifest(vault_root, slug, manifest)
         count += 1
     return count, None
@@ -563,7 +589,6 @@ def delete_tag(vault_root, tag):
         if tag not in tags:
             continue
         manifest["tags"] = [t for t in tags if t != tag]
-        manifest["updated_at"] = utils.now_iso()
         storage.write_manifest(vault_root, slug, manifest)
         count += 1
     return count, None
@@ -630,6 +655,6 @@ def convert_folders_to_tags(vault_root, allowed_tags=None):
         if merged != existing:
             added += len(merged) - len(existing)
             manifest["tags"] = merged
-            manifest["updated_at"] = utils.now_iso()
+            # No updated_at bump — see the note above rename_tag.
             storage.write_manifest(vault_root, slug, manifest)
     return {"converted": converted, "added": added}

@@ -378,10 +378,13 @@ function renderEntryMetadataForm(controller, entry) {
         data.compare_image_clear = true;
       }
       formData.append("data", JSON.stringify(data));
-      await VaultAPI.updateEntryMetadata(entry.id, formData, { onProgress: (event) => progress.update(event) });
+      const result = await VaultAPI.updateEntryMetadata(entry.id, formData, { onProgress: (event) => progress.update(event) });
       controller.setDirty(false);
       await controller.refresh();
       showToast("Entry updated.", "success");
+      // Best-effort media that didn't save isn't an error, but reporting a bare
+      // success would hide the fact that a file was dropped.
+      for (const warning of result?.warnings || []) showToast(warning, "warn", 8000);
       return true;
     } catch (e) {
       showToast(e.message, "error");

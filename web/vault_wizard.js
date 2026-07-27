@@ -382,6 +382,9 @@ function renderCreateForm(controller) {
       if (entry.skipped_files?.length) {
         showToast(`Skipped unsupported file(s): ${entry.skipped_files.join(", ")}`, "warn");
       }
+      // Best-effort media (archival originals, the compare overlay) that could
+      // not be saved — the entry itself is fine, but the user must be told.
+      for (const warning of entry.warnings || []) showToast(warning, "warn", 8000);
       return true;
     } catch (e) {
       status.textContent = e.message;

@@ -784,6 +784,28 @@ async def post_update_version(request):
         return web.json_response(storage.build_entry_state(vault_root, slug))
 
 
+@_post("/workflow-vault/entries/{entry_id}/versions/{version_id}/delete")
+async def post_delete_version(request):
+    vault_root, err = _require_vault()
+    if err:
+        return err
+    entry_id = request.match_info["entry_id"]
+    version_id = request.match_info["version_id"]
+    slug, manifest, err = _require_entry(vault_root, entry_id)
+    if err:
+        return err
+
+    async with _write_lock(vault_root):
+        slug, manifest, err = _require_entry(vault_root, entry_id)
+        if err:
+            return err
+        _new_current, err_msg = versions.delete_version(vault_root, manifest, slug, version_id)
+        if err_msg:
+            return _error(err_msg)
+        storage.write_manifest(vault_root, slug, manifest)
+        return web.json_response(storage.build_entry_state(vault_root, slug))
+
+
 @routes.get("/workflow-vault/entries/{entry_id}/versions/{version_id}/workflow")
 async def get_version_workflow(request):
     vault_root, err = _require_vault()

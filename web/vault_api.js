@@ -113,6 +113,8 @@ export const VaultAPI = {
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/versions/${encodeURIComponent(versionId)}/promote`, {}),
   updateVersionNotes: (entryId, versionId, notes) =>
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/versions/${encodeURIComponent(versionId)}`, { notes }),
+  deleteVersion: (entryId, versionId) =>
+    postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/versions/${encodeURIComponent(versionId)}/delete`, {}),
   getVersionWorkflow: (entryId, versionId) =>
     getJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/versions/${encodeURIComponent(versionId)}/workflow`),
 

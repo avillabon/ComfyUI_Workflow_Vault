@@ -86,6 +86,22 @@ function renderVersionCard(controller, entry, version) {
       ])
     );
   }
+
+  // Rendered disabled rather than hidden on the last remaining version, so the
+  // rule is visible instead of the button silently going missing.
+  const isOnlyVersion = (entry.versions || []).length <= 1;
+  actions.appendChild(
+    el(
+      "button",
+      {
+        className: "wv-btn wv-btn-small wv-btn-danger",
+        disabled: isOnlyVersion,
+        title: isOnlyVersion ? "An entry must keep at least one version" : "Delete this version",
+        onclick: () => deleteVersion(controller, entry, version),
+      },
+      [el("i", { className: "pi pi-trash" }), "Delete"]
+    )
+  );
   card.appendChild(actions);
 
   return card;
@@ -149,6 +165,44 @@ async function overwriteVersion(controller, entry, version) {
     await VaultAPI.overwriteVersion(entry.id, version.id, { workflow });
     await controller.refresh();
     showToast("Version overwritten.", "success");
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+async function deleteVersion(controller, entry, version) {
+  const label = version.custom_label || version.label;
+  const trash = controller.state?.trash_label || "Trash";
+  const isCurrent = version.id === entry.current_version_id;
+  // Deleting the current version isn't blocked, but the user should know the
+  // "Current" badge is about to move before they confirm.
+  const successor = isCurrent
+    ? [...(entry.versions || [])]
+        .filter((v) => v.id !== version.id)
+        .sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""))
+        .pop()
+    : null;
+
+  const lines = [
+    `"${label}" and its saved workflow will be moved to the ${trash}.`,
+    `This can't be undone from inside the vault — you'd restore it from the ${trash}.`,
+  ];
+  if (successor) {
+    lines.splice(1, 0, `It is the current version, so "${successor.custom_label || successor.label}" will become current.`);
+  }
+
+  const ok = await confirmDialog({
+    title: `Delete version "${label}"?`,
+    message: lines.join("\n"),
+    confirmText: "Delete",
+    danger: true,
+  });
+  if (!ok) return;
+
+  try {
+    await VaultAPI.deleteVersion(entry.id, version.id);
+    await controller.refresh();
+    showToast(`Version "${label}" moved to the ${trash}.`, "success");
   } catch (e) {
     showToast(e.message, "error");
   }

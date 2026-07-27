@@ -128,6 +128,40 @@ def update_version_notes(vault_root, manifest, slug, version_id, notes):
     return version, None
 
 
+def delete_version(vault_root, manifest, slug, version_id):
+    """Delete a version's folder, preferring the OS trash so it stays
+    recoverable. Mutates ``manifest`` in place. Returns (new_current_id, error).
+
+    An entry always keeps at least one version: deleting the last one would
+    leave an entry whose "Open Workflow" button has nothing to open, and whose
+    current_version_id points at nothing. Deleting the *current* version is
+    allowed — the next-most-recent survivor is promoted in its place, so the
+    entry is never left without a current version."""
+    all_versions = storage.list_versions(vault_root, slug)
+    version = next((v for v in all_versions if v.get("id") == version_id), None)
+    if not version:
+        return None, "Version not found."
+    if len(all_versions) <= 1:
+        return None, "An entry must keep at least one version."
+
+    vdir = storage.version_dir(vault_root, slug, version["dir"])
+    versions_root = storage.versions_dir(vault_root, slug)
+    # Defensive: never delete anything outside this entry's versions folder.
+    if not utils.is_path_inside(versions_root, vdir) or not os.path.isdir(vdir):
+        return None, "Version folder not found."
+    try:
+        utils.send_to_trash(vdir)
+    except OSError as e:
+        return None, f"Could not delete version: {e}"
+
+    if manifest.get("current_version_id") == version_id:
+        # list_versions sorts oldest first, so the last survivor is the newest.
+        survivors = [v for v in all_versions if v.get("id") != version_id]
+        manifest["current_version_id"] = survivors[-1].get("id")
+    manifest["updated_at"] = utils.now_iso()
+    return manifest.get("current_version_id"), None
+
+
 def get_version_workflow(vault_root, slug, version_id):
     version = _find_version(vault_root, slug, version_id)
     if not version:

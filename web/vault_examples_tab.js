@@ -370,8 +370,8 @@ function renderAddMediaRow(controller, entry, example) {
     return el("div", { className: "wv-example-io-col" }, [picker.element, progress.element]);
   };
 
-  row.appendChild(makeZone("input", "Drag inputs here, or"));
-  row.appendChild(makeZone("output", "Drag outputs here, or"));
+  row.appendChild(makeZone("input", "Drag inputs here, paste, or"));
+  row.appendChild(makeZone("output", "Drag outputs here, paste, or"));
   return row;
 }
 

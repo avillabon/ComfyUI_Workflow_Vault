@@ -111,7 +111,8 @@ example media already filled in. You can switch to your own folder later from
     current one, promote a past version, and edit per-version notes.
   - **Examples** — add, edit, delete, and reorder examples and their
     input/output media, with live previews and drag-to-move between Inputs and
-    Outputs.
+    Outputs. Media can be dropped, browsed, or pasted (Ctrl+V / **Paste from
+    clipboard**) into either the Inputs or the Outputs zone.
 - **Entry actions** (in the Settings tab) — **Duplicate** an entry into a new
   one (copies the thumbnail, tags, generation types, examples, and notes, plus
   only the current version), **Archive** / restore, and **Delete** (sent to the
@@ -133,7 +134,18 @@ example media already filled in. You can switch to your own folder later from
   - **Static frame** — scrub to a frame and capture it as a still WebP, entirely
     in the browser (no ffmpeg needed).
   The untouched original (image or video) is kept as a separate archival source
-  either way, and original file dates are preserved.
+  either way, and original file dates are preserved. A × on the preview clears
+  the pick, here and in **Settings → Workflow Details**.
+- **Paste from the clipboard** — every media box takes the clipboard as well as
+  drops: the thumbnail, the compare image, and each example's Inputs / Outputs
+  section. Press **Ctrl+V** with the box focused or under the cursor, or click
+  **Paste from clipboard**. A paste lands in exactly one box (focus wins over
+  the cursor), example pastes keep the input/output role of the section they
+  land in, and text on the clipboard is left alone. Screenshots come in as
+  images; files copied in Explorer/Finder arrive with their own names, so a
+  copied video still offers the animated-vs-frame choice and several copied
+  files land in one go. Firefox adds its own confirmation popup to the button —
+  that prompt is the browser's, so Ctrl+V is the one-gesture route there.
 - **Compare image** (optional) — a second media slot with the exact same picker
   and behavior as the thumbnail (image or video, animated or captured still).
   When set, it becomes the "before" layer of the hover compare slider on the

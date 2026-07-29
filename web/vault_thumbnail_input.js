@@ -1,6 +1,6 @@
 // Thumbnail picker: a single themed drag-and-drop box that doubles as the
-// live preview (click to browse). The hidden <input type="file"> is exposed
-// as `.fileInput` so callers can read `.files[0]` and listen for change.
+// live preview (click to browse, or paste). The hidden <input type="file"> is
+// exposed as `.fileInput` so callers can read `.files[0]` and listen for change.
 //
 // Images behave as before. A dropped video (MP4/MOV/WebM) prompts for one of
 // two outcomes in the same slot:
@@ -13,6 +13,7 @@
 import { el, clear, videoEl, showToast, noteVideoDecodeFailure, VIDEO_DECODE_HINT } from "./vault_dom.js";
 import { makeThumbnailFile, captureVideoFrameFile } from "./vault_image.js";
 import { canvasAvailable, detectCanvasMedia, fetchCanvasFile } from "./vault_canvas_media.js";
+import { onPasteInto, renderPasteButton } from "./vault_clipboard.js";
 
 const IMAGE_EXTS = ["png", "jpg", "jpeg", "webp", "gif"];
 const VIDEO_EXTS = ["mp4", "mov", "webm"];
@@ -54,7 +55,7 @@ export function renderThumbnailField({ currentUrl = null, clearable = false, nou
     className: "wv-dropzone wv-thumb-dropzone",
     role: "button",
     tabindex: "0",
-    "aria-label": `Choose or drop a ${noun} (image or video)`,
+    "aria-label": `Choose, drop, or paste a ${noun} (image or video)`,
     onclick: () => {
       if (!busy) fileInput.click();
     },
@@ -114,7 +115,9 @@ export function renderThumbnailField({ currentUrl = null, clearable = false, nou
     clear(zone);
     zone.classList.remove("wv-thumb-has-image");
     zone.appendChild(el("i", { className: "pi pi-image wv-dropzone-icon" }));
-    zone.appendChild(el("div", { className: "wv-dropzone-text" }, ["Drag a file here, or ", el("span", { className: "wv-dropzone-browse" }, ["browse"])]));
+    zone.appendChild(
+      el("div", { className: "wv-dropzone-text" }, ["Drag a file here, paste, or ", el("span", { className: "wv-dropzone-browse" }, ["browse"])])
+    );
     zone.appendChild(el("div", { className: "wv-dropzone-hint" }, ["Image (PNG · JPG · WebP · GIF) or video (MP4 · MOV · WebM)"]));
   }
 
@@ -358,9 +361,9 @@ export function renderThumbnailField({ currentUrl = null, clearable = false, nou
     fileInput.dispatchEvent(new Event("change", { bubbles: true }));
   });
 
-  // --- Import from the live ComfyUI canvas -------------------------------
-  // Feed a File through the same path as a manual pick (validate + change),
-  // so images and the video animated/frame fork behave identically.
+  // Feed a File from anywhere (canvas import, clipboard) through the same path
+  // as a manual pick (validate + change), so images and the video
+  // animated/frame fork behave identically whatever the source.
   function injectFile(file) {
     if (!validate(file)) return;
     const dt = new DataTransfer();
@@ -368,6 +371,12 @@ export function renderThumbnailField({ currentUrl = null, clearable = false, nou
     fileInput.files = dt.files;
     fileInput.dispatchEvent(new Event("change", { bubbles: true }));
   }
+
+  // A thumbnail is a single asset, so a multi-file paste takes the first.
+  // Suspended while the video choice prompt is up, matching click/keydown.
+  onPasteInto(zone, (files) => injectFile(files[0]), { isBusy: () => busy });
+
+  // --- Import from the live ComfyUI canvas -------------------------------
 
   async function useCanvasItem(item, btn) {
     if (btn) btn.disabled = true;
@@ -437,6 +446,7 @@ export function renderThumbnailField({ currentUrl = null, clearable = false, nou
   }
 
   const children = [zone, fileInput];
+  const actions = [];
   if (allowCanvasImport && canvasAvailable()) {
     const importBtn = el(
       "button",
@@ -444,8 +454,15 @@ export function renderThumbnailField({ currentUrl = null, clearable = false, nou
       [el("i", { className: "pi pi-sitemap" }), el("span", {}, ["Import from workflow"])]
     );
     importBtn.addEventListener("click", () => importFromCanvas(importBtn));
-    children.push(importBtn);
+    actions.push(importBtn);
   }
+  const pasteBtn = renderPasteButton({
+    className: "wv-btn-link wv-thumb-import",
+    title: `Paste a copied image as the ${noun} (or press Ctrl+V over the box)`,
+    onFiles: (files) => injectFile(files[0]),
+  });
+  if (pasteBtn) actions.push(pasteBtn);
+  if (actions.length) children.push(el("div", { className: "wv-thumb-actions" }, actions));
 
   const wrap = el("div", { className: "wv-thumb-field" }, children);
   wrap.fileInput = fileInput;

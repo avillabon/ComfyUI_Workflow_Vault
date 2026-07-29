@@ -156,7 +156,7 @@ function renderCreateForm(controller) {
   );
   const genTypePicker = renderGenTypePicker([], () => { markDirty(); genErr.style.display = "none"; });
   const favSwitch = toggleField("Favorite", false, markDirty);
-  const thumbField = renderThumbnailField({ currentUrl: null, allowCanvasImport: true });
+  const thumbField = renderThumbnailField({ currentUrl: null, clearable: true, allowCanvasImport: true });
   const compareField = renderThumbnailField({ currentUrl: null, clearable: true, noun: "compare image", allowCanvasImport: true });
 
   // --- Right column inputs: version + notes ---

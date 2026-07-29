@@ -1972,6 +1972,37 @@
   font-size: 11px;
 }
 
+/* Row of link actions under a thumbnail box (import from workflow, paste) */
+.wv-thumb-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+/* Paste affordances in the media picker: right of an Inputs/Outputs heading,
+   or under the simple dropzone. The heading is uppercase + tracked out; the
+   link inside it isn't. */
+.wv-mp-section-paste {
+  margin-left: auto;
+  padding: 0 2px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.wv-mp-paste-row {
+  display: flex;
+  justify-content: center;
+}
+
+.wv-mp-paste {
+  align-self: center;
+  font-size: 11px;
+}
+
 /* Chooser overlay: pick one canvas image/video for a single-asset field */
 .wv-canvas-choose-dialog {
   width: min(720px, 92vw);

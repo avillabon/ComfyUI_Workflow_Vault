@@ -11,6 +11,7 @@
 
 import { el, clear, videoEl, showToast, confirmDialog } from "./vault_dom.js";
 import { canvasAvailable, detectCanvasMedia, fetchCanvasFile } from "./vault_canvas_media.js";
+import { onPasteInto, renderPasteButton } from "./vault_clipboard.js";
 
 export const MEDIA_ACCEPT = ".png,.jpg,.jpeg,.webp,.gif,.mp4,.mov,.webm,.wav,.mp3,.m4a,.flac,.ogg";
 const MEDIA_EXTS = MEDIA_ACCEPT.split(",").map((e) => e.replace(".", "").trim());
@@ -166,7 +167,7 @@ export function renderMediaPicker({ accept = MEDIA_ACCEPT, onChange, preview = f
       },
     }, [
       el("i", { className: "pi pi-upload wv-dropzone-icon" }),
-      el("div", { className: "wv-dropzone-text" }, [label ? `${label} ` : "Drag files here, or ", el("span", { className: "wv-dropzone-browse" }, ["browse"])]),
+      el("div", { className: "wv-dropzone-text" }, [label ? `${label} ` : "Drag files here, paste, or ", el("span", { className: "wv-dropzone-browse" }, ["browse"])]),
       el("div", { className: "wv-dropzone-hint" }, ["Images · video · audio"]),
     ]);
     zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("wv-dropzone-over"); });
@@ -176,9 +177,16 @@ export function renderMediaPicker({ accept = MEDIA_ACCEPT, onChange, preview = f
       zone.classList.remove("wv-dropzone-over");
       addFiles(e.dataTransfer?.files, role);
     });
+    onPasteInto(zone, (files) => addFiles(files, role));
 
     wrap.appendChild(zone);
     wrap.appendChild(fileInput);
+    const pasteBtn = renderPasteButton({
+      className: "wv-btn-link wv-mp-paste",
+      title: `Paste copied media as ${role === "input" ? "an input" : "an output"} (or press Ctrl+V over the box)`,
+      onFiles: (files) => addFiles(files, role),
+    });
+    if (pasteBtn) wrap.appendChild(el("div", { className: "wv-mp-paste-row" }, [pasteBtn]));
     wrap.appendChild(list);
   }
 
@@ -327,18 +335,27 @@ export function renderMediaPicker({ accept = MEDIA_ACCEPT, onChange, preview = f
     return btn;
   }
 
+  // Inputs and Outputs are separate paste targets: a paste lands in whichever
+  // section holds focus or the cursor, so it needs no role fix-up afterwards.
+  function buildSection(role, title, icon, grid) {
+    const head = el("div", { className: "wv-mp-section-head" }, [el("i", { className: icon }), el("span", {}, [title])]);
+    const pasteBtn = renderPasteButton({
+      className: "wv-btn-link wv-mp-section-paste",
+      title: `Paste copied media into ${title} (or press Ctrl+V over this section)`,
+      onFiles: (files) => addFiles(files, role),
+    });
+    if (pasteBtn) head.appendChild(pasteBtn);
+    const section = el("div", { className: "wv-mp-section" }, [head, grid]);
+    onPasteInto(section, (files) => addFiles(files, role));
+    return section;
+  }
+
   function buildPreviewLayout() {
     inputsGrid = el("div", { className: "wv-mp-grid" });
     outputsGrid = el("div", { className: "wv-mp-grid" });
 
-    const inputsSection = el("div", { className: "wv-mp-section" }, [
-      el("div", { className: "wv-mp-section-head" }, [el("i", { className: "pi pi-arrow-down-left" }), el("span", {}, ["Inputs"])]),
-      inputsGrid,
-    ]);
-    const outputsSection = el("div", { className: "wv-mp-section" }, [
-      el("div", { className: "wv-mp-section-head" }, [el("i", { className: "pi pi-arrow-up-right" }), el("span", {}, ["Outputs"])]),
-      outputsGrid,
-    ]);
+    const inputsSection = buildSection("input", "Inputs", "pi pi-arrow-down-left", inputsGrid);
+    const outputsSection = buildSection("output", "Outputs", "pi pi-arrow-up-right", outputsGrid);
 
     wrap.classList.add("wv-media-picker-preview");
     wrap.appendChild(fileInput);

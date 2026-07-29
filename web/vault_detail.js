@@ -1,7 +1,7 @@
 // Entry detail view: header, tab router, plus the Overview and Settings
 // tabs (the others live in their own modules to keep files manageable).
 
-import { el, clear, formatDate, showToast, confirmDialog, promptDialog, openImageLightbox, toggleField, createProgressStatus } from "./vault_dom.js";
+import { el, clear, videoEl, formatDate, showToast, confirmDialog, promptDialog, openImageLightbox, toggleField, createProgressStatus } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
 import { STATUS_LABELS, STATUS_ORDER, renderGenTypePicker, GENERATION_TYPE_MAP } from "./vault_modal.js";
 import { openWorkflowInGraph } from "./vault_workflow.js";
@@ -817,7 +817,7 @@ function renderCarouselMedia(entry, item) {
   if (item.type === "image") {
     return el("img", { src: url, alt: item.label, className: "wv-carousel-image", onclick: () => openImageLightbox(url, item.label) });
   }
-  if (item.type === "video") return el("video", { src: url, controls: true });
+  if (item.type === "video") return videoEl({ src: url, controls: true });
   if (item.type === "audio") return el("audio", { src: url, controls: true });
   return el("div", { className: "wv-gallery-item-icon" }, [el("i", { className: "pi pi-file" })]);
 }
@@ -825,7 +825,7 @@ function renderCarouselMedia(entry, item) {
 function renderGalleryThumb(entry, item) {
   const url = VaultAPI.mediaUrl(entry.id, item.file);
   if (item.type === "image") return el("img", { src: url, alt: item.label });
-  if (item.type === "video") return el("video", { src: url, muted: true, preload: "metadata" });
+  if (item.type === "video") return videoEl({ src: url, muted: true, preload: "metadata" }, { compact: true });
   if (item.type === "audio") return el("div", { className: "wv-gallery-item-icon" }, [el("i", { className: "pi pi-volume-up" })]);
   return el("div", { className: "wv-gallery-item-icon" }, [el("i", { className: "pi pi-file" })]);
 }

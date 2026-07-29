@@ -30,6 +30,76 @@ export function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
 }
 
+// --- Video that fails visibly ---------------------------------------------
+// Some machines can't decode video even though the bytes arrive intact — most
+// often Firefox on a box with a virtual display adapter (Parsec, Sunshine,
+// RDP, a VM), where hardware decoding lands on an adapter with no decoder and
+// the software fallback doesn't take over. The tell is that no `error` event
+// fires at all: the element sits at readyState 0 forever showing empty
+// controls, which reads as "the vault is broken" rather than "this browser
+// can't decode". So we watch for the error event AND for a stall.
+//
+// When this happens every <video> on the page fails at once, so each element
+// degrades on its own but the explanation is only shown once per session.
+
+const VIDEO_STALL_MS = 10000; // vault media comes off localhost; 10s is generous
+export const VIDEO_DECODE_HINT =
+  "Videos aren't playing in this browser. If it's Firefox, open about:config, set " +
+  "media.hardware-video-decoding.enabled to false, and restart it. This usually happens " +
+  "on machines with a virtual display adapter (Parsec, Sunshine, RDP, or a VM).";
+
+let videoHintShown = false;
+
+export function noteVideoDecodeFailure() {
+  if (videoHintShown) return;
+  videoHintShown = true;
+  showToast(VIDEO_DECODE_HINT, "error", 15000);
+}
+
+function replaceWithFallback(video, compact) {
+  if (!video.parentNode) return;
+  const children = [el("i", { className: "pi pi-exclamation-triangle" })];
+  if (!compact) children.push(el("span", {}, ["Can't play this video"]));
+  // Keep the original classes so the surrounding layout still sizes the box.
+  video.replaceWith(
+    el(
+      "div",
+      { className: `wv-video-failed ${video.className}`.trim(), title: VIDEO_DECODE_HINT },
+      children
+    )
+  );
+}
+
+/**
+ * Creates a <video> that degrades visibly instead of silently. On a decode
+ * error — or a load that never yields any data — the element is swapped for a
+ * small "can't play" box and the fix is explained once per session.
+ * Options: `onFail` takes over the failure handling (nothing is swapped);
+ * `compact` drops the caption, for thumbnail-sized boxes.
+ */
+export function videoEl(props = {}, { onFail = null, compact = false } = {}) {
+  const video = el("video", props);
+  let settled = false;
+  let timer = null;
+  const settle = (failed) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    if (!failed) return;
+    noteVideoDecodeFailure();
+    if (onFail) onFail(video);
+    else replaceWithFallback(video, compact);
+  };
+  video.addEventListener("error", () => settle(true));
+  // Any of these may be the first to fire depending on codec and browser.
+  for (const ev of ["loadedmetadata", "loadeddata", "canplay"]) {
+    video.addEventListener(ev, () => settle(false));
+  }
+  // Nothing fired either way: nothing decoded by now means it never will.
+  timer = setTimeout(() => settle(video.readyState === 0), VIDEO_STALL_MS);
+  return video;
+}
+
 // Apply the user's accent color globally (on <html>) so it reaches both the
 // vault modal AND the sidebar rail buttons, which render outside the modal in
 // ComfyUI's own sidebar. Invalid/empty values are ignored, leaving the default.

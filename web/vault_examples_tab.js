@@ -1,7 +1,7 @@
 // Examples tab: reference media (inputs/outputs) plus notes for each
 // example, with simple add/edit/reorder/delete management.
 
-import { el, clear, showToast, confirmDialog, promptDialog, formDialog, createProgressStatus } from "./vault_dom.js";
+import { el, clear, videoEl, showToast, confirmDialog, promptDialog, formDialog, createProgressStatus } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
 import { renderMarkdown } from "./vault_markdown.js";
 import { renderMediaPicker } from "./vault_media_picker.js";
@@ -321,7 +321,7 @@ function enableExampleMediaDnd(controller, entry, example, inputsGrid, outputsGr
 function renderMediaPreview(entry, item) {
   const url = VaultAPI.mediaUrl(entry.id, item.file);
   if (item.type === "image") return el("img", { src: url, className: "wv-media-thumb", alt: item.label });
-  if (item.type === "video") return el("video", { src: url, controls: true, className: "wv-media-thumb" });
+  if (item.type === "video") return videoEl({ src: url, controls: true, className: "wv-media-thumb" });
   if (item.type === "audio") return el("audio", { src: url, controls: true, className: "wv-media-audio" });
   return el("div", { className: "wv-media-thumb wv-card-thumb-placeholder" }, ["?"]);
 }

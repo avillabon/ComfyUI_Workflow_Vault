@@ -9,7 +9,7 @@
 //     with an "Add media" tile. Used in the wizard + add-example form, where
 //     files are gathered before a single submit.
 
-import { el, clear, showToast, confirmDialog } from "./vault_dom.js";
+import { el, clear, videoEl, showToast, confirmDialog } from "./vault_dom.js";
 import { canvasAvailable, detectCanvasMedia, fetchCanvasFile } from "./vault_canvas_media.js";
 
 export const MEDIA_ACCEPT = ".png,.jpg,.jpeg,.webp,.gif,.mp4,.mov,.webm,.wav,.mp3,.m4a,.flac,.ogg";
@@ -196,7 +196,7 @@ export function renderMediaPicker({ accept = MEDIA_ACCEPT, onChange, preview = f
     if (kind === "image") {
       thumb.appendChild(el("img", { className: "wv-mp-media", src: entry.url, alt: entry.file.name }));
     } else if (kind === "video") {
-      const video = el("video", { className: "wv-mp-media", src: entry.url, muted: true, preload: "metadata", playsinline: true });
+      const video = videoEl({ className: "wv-mp-media", src: entry.url, muted: true, preload: "metadata", playsinline: true }, { compact: true });
       const dur = el("span", { className: "wv-mp-dur" });
       video.addEventListener("loadedmetadata", () => { dur.textContent = formatDuration(video.duration); });
       thumb.appendChild(video);

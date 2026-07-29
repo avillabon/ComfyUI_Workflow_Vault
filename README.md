@@ -252,6 +252,34 @@ Vault Settings (⚙) is organized into three tabs:
   `vault_config.json`, not inside the vault. Moving a ComfyUI install may require
   pointing Workflow Vault at the vault folder again.
 
+## Troubleshooting
+
+### Example videos show playback controls but won't play (stuck at 0:00 / 0:00)
+
+Videos load but never show a frame — blank player, black thumbnails in the
+example filmstrip, no error message. Images in the same entry load fine, and the
+same vault plays normally in Chrome or Edge.
+
+This is a browser video-decoding problem, not a vault problem. It shows up on
+machines that have a **virtual display adapter** installed — Parsec, Sunshine /
+Moonlight, RDP, or a VM — which is common for a headless ComfyUI box you drive
+remotely. Firefox picks one adapter for hardware video decoding, and if it lands
+on the virtual one (which has no decoder) it doesn't reliably fall back to
+software decoding.
+
+Fix, in Firefox:
+
+1. Open `about:config` and accept the warning.
+2. Search for `media.hardware-video-decoding.enabled`.
+3. Double-click it to set it to `false`.
+4. Fully quit and restart Firefox — not just the tab.
+
+This forces software decoding, which handles typical example clips comfortably.
+It's fully reversible. If that doesn't help, check `about:support` → Graphics to
+see which adapter Firefox chose, or point Firefox at the real GPU via **Windows
+Settings → System → Display → Graphics → Add desktop app → firefox.exe →
+Options → High performance**.
+
 ## Manual smoke checklist
 
 Before calling a build release-ready, test it in a live ComfyUI session:

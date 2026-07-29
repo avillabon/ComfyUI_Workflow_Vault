@@ -10,7 +10,7 @@
 //     WebP; the original video is still archived alongside it.
 // Callers get the right upload parts via `await field.getUpload()`.
 
-import { el, clear, showToast } from "./vault_dom.js";
+import { el, clear, videoEl, showToast, noteVideoDecodeFailure, VIDEO_DECODE_HINT } from "./vault_dom.js";
 import { makeThumbnailFile, captureVideoFrameFile } from "./vault_image.js";
 import { canvasAvailable, detectCanvasMedia, fetchCanvasFile } from "./vault_canvas_media.js";
 
@@ -132,7 +132,7 @@ export function renderThumbnailField({ currentUrl = null, clearable = false, nou
     clear(zone);
     zone.classList.add("wv-thumb-has-image");
     zone.appendChild(
-      el("video", { src, className: "wv-thumb-img", autoplay: true, muted: true, loop: true, playsinline: true })
+      videoEl({ src, className: "wv-thumb-img", autoplay: true, muted: true, loop: true, playsinline: true }, { compact: true })
     );
     zone.appendChild(el("div", { className: "wv-thumb-change" }, ["Change"]));
     maybeAddClear();
@@ -185,7 +185,27 @@ export function renderThumbnailField({ currentUrl = null, clearable = false, nou
       if (e.key === "Escape") cleanup();
     };
 
-    const video = el("video", { src, className: "wv-framepick-video", muted: true, playsinline: true, preload: "auto" });
+    // Unlike the read-only players elsewhere, this one can't degrade quietly:
+    // picking a frame from a video the browser never decoded would capture
+    // nothing (or a blank frame), so the picker shuts itself down and says why.
+    let decodeFailed = false;
+    function onDecodeFail() {
+      decodeFailed = true;
+      slider.disabled = true;
+      useBtn.disabled = true;
+      if (!video.parentNode) return;
+      video.replaceWith(
+        el("div", { className: "wv-video-failed wv-framepick-video", title: VIDEO_DECODE_HINT }, [
+          el("i", { className: "pi pi-exclamation-triangle" }),
+          el("span", {}, ['This browser can\'t decode the video, so no frame can be picked. Use "Animated" instead.']),
+        ])
+      );
+    }
+
+    const video = videoEl(
+      { src, className: "wv-framepick-video", muted: true, playsinline: true, preload: "auto" },
+      { onFail: onDecodeFail }
+    );
     const slider = el("input", { type: "range", min: "0", max: "1000", value: "0", className: "wv-framepick-slider", disabled: true });
 
     const useBtn = el(
@@ -195,6 +215,14 @@ export function renderThumbnailField({ currentUrl = null, clearable = false, nou
         className: "wv-btn wv-btn-primary",
         disabled: true,
         onclick: async () => {
+          // The 2.5s fallback below enables this button even when nothing ever
+          // loaded. A video with no decoded dimensions can't be captured from
+          // at any position, so say that instead of blaming the seek position.
+          if (decodeFailed || !video.videoWidth) {
+            showToast("This browser hasn't decoded the video, so no frame can be captured.", "error");
+            noteVideoDecodeFailure();
+            return;
+          }
           // Seeking is asynchronous: if the user clicks right after dragging,
           // wait for the seek to settle so we capture the frame they actually
           // chose rather than the previously-painted one.
@@ -367,7 +395,7 @@ export function renderThumbnailField({ currentUrl = null, clearable = false, nou
     for (const item of items) {
       const media =
         item.mediaType === "video"
-          ? el("video", { src: item.url, className: "wv-canvas-choose-media", muted: true, loop: true, playsinline: true, autoplay: true })
+          ? videoEl({ src: item.url, className: "wv-canvas-choose-media", muted: true, loop: true, playsinline: true, autoplay: true }, { compact: true })
           : el("img", { src: item.url, className: "wv-canvas-choose-media", alt: item.filename });
       grid.appendChild(
         el(

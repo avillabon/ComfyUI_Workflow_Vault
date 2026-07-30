@@ -1,7 +1,7 @@
 // Vault-wide settings: stats, vault location, defaults, and tag management,
 // laid out as a constrained column of panels.
 
-import { el, showToast, confirmDialog, promptDialog, applyAccentColor } from "./vault_dom.js";
+import { el, showToast, confirmDialog, promptDialog, applyAccentColor, formatBytes } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
 
 // Optional grid-card fields the user can hide for a more minimal look.
@@ -16,14 +16,6 @@ const CARD_FIELD_DEFS = [
 // Curated accent presets shown as swatches alongside the custom color picker.
 const PRESET_ACCENTS = ["#4d9fff", "#22c55e", "#a855f7", "#f59e0b", "#ef4444", "#ec4899", "#14b8a6"];
 const DEFAULT_ACCENT = "#4d9fff";
-
-function formatBytes(n) {
-  n = Math.max(0, n || 0);
-  if (n >= 1024 ** 3) return (n / 1024 ** 3).toFixed(2) + " GB";
-  if (n >= 1024 ** 2) return (n / 1024 ** 2).toFixed(1) + " MB";
-  if (n >= 1024) return (n / 1024).toFixed(0) + " KB";
-  return n + " B";
-}
 
 function panel(title, icon, hint) {
   const p = el("div", { className: "wv-vs-panel" });

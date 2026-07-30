@@ -10,7 +10,7 @@
 //     WebP; the original video is still archived alongside it.
 // Callers get the right upload parts via `await field.getUpload()`.
 
-import { el, clear, videoEl, showToast, noteVideoDecodeFailure, VIDEO_DECODE_HINT } from "./vault_dom.js";
+import { el, clear, videoEl, showToast, noteVideoDecodeFailure, VIDEO_DECODE_HINT, VIDEO_CODEC_HINT } from "./vault_dom.js";
 import { makeThumbnailFile, captureVideoFrameFile } from "./vault_image.js";
 import { canvasAvailable, detectCanvasMedia, fetchCanvasFile } from "./vault_canvas_media.js";
 import { onPasteInto, renderPasteButton } from "./vault_clipboard.js";
@@ -192,15 +192,30 @@ export function renderThumbnailField({ currentUrl = null, clearable = false, nou
     // picking a frame from a video the browser never decoded would capture
     // nothing (or a blank frame), so the picker shuts itself down and says why.
     let decodeFailed = false;
-    function onDecodeFail() {
+    let failReason = "stall";
+    function onDecodeFail(_video, reason = "stall") {
       decodeFailed = true;
+      failReason = reason;
       slider.disabled = true;
       useBtn.disabled = true;
       if (!video.parentNode) return;
+      // An unsupported codec and a stalled decoder need different advice, and
+      // the hardware-decoding pref does nothing for the former. Nothing can be
+      // converted here — the file isn't in the vault yet — so point at the
+      // choice that does work.
+      const codec = reason === "codec";
       video.replaceWith(
-        el("div", { className: "wv-video-failed wv-framepick-video", title: VIDEO_DECODE_HINT }, [
+        el("div", {
+          className: "wv-video-failed wv-framepick-video",
+          title: codec ? VIDEO_CODEC_HINT : VIDEO_DECODE_HINT,
+        }, [
           el("i", { className: "pi pi-exclamation-triangle" }),
-          el("span", {}, ['This browser can\'t decode the video, so no frame can be picked. Use "Animated" instead.']),
+          el("span", {}, [
+            codec
+              ? "This browser can't decode this video's format (usually H.265/HEVC), so no frame can be "
+                + 'picked. Use "Animated" instead, or save an H.264 copy of the file first.'
+              : 'This browser can\'t decode the video, so no frame can be picked. Use "Animated" instead.',
+          ]),
         ])
       );
     }
@@ -223,7 +238,7 @@ export function renderThumbnailField({ currentUrl = null, clearable = false, nou
           // at any position, so say that instead of blaming the seek position.
           if (decodeFailed || !video.videoWidth) {
             showToast("This browser hasn't decoded the video, so no frame can be captured.", "error");
-            noteVideoDecodeFailure();
+            noteVideoDecodeFailure(failReason);
             return;
           }
           // Seeking is asynchronous: if the user clicks right after dragging,

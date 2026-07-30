@@ -2,6 +2,7 @@
 // the Workflow Vault UI.
 
 import { app } from "../../scripts/app.js";
+import { VaultAPI } from "./vault_api.js";
 
 export function el(tag, props = {}, children = []) {
   const node = document.createElement(tag);
@@ -31,53 +32,119 @@ export function clear(node) {
 }
 
 // --- Video that fails visibly ---------------------------------------------
-// Some machines can't decode video even though the bytes arrive intact — most
-// often Firefox on a box with a virtual display adapter (Parsec, Sunshine,
-// RDP, a VM), where hardware decoding lands on an adapter with no decoder and
-// the software fallback doesn't take over. The tell is that no `error` event
-// fires at all: the element sits at readyState 0 forever showing empty
-// controls, which reads as "the vault is broken" rather than "this browser
-// can't decode". So we watch for the error event AND for a stall.
+// A <video> can fail to play for two quite different reasons, and they need
+// different answers:
 //
-// When this happens every <video> on the page fails at once, so each element
-// degrades on its own but the explanation is only shown once per session.
+// "codec" — the browser decoded nothing because it doesn't support the format.
+//   Firefox is the usual case: it plays H.265/HEVC only via a hardware decoder
+//   and has no software fallback, so ComfyUI's HEVC outputs play in Chrome and
+//   show nothing in Firefox. The element fires `error` with
+//   MEDIA_ERR_SRC_NOT_SUPPORTED. This one is fixable — we offer to re-encode a
+//   browser-safe H.264 copy alongside the original.
+//
+// "stall" — the bytes arrive and the format is fine, but decoding never starts.
+//   Typically Firefox on a box with a virtual display adapter (Parsec,
+//   Sunshine, RDP, a VM), where hardware decoding lands on an adapter with no
+//   decoder and software decoding doesn't take over. The tell is that NO event
+//   fires at all: the element sits at readyState 0 forever showing empty
+//   controls. Converting wouldn't help; the pref does.
+//
+// Either way every <video> on the page fails at once, so each element degrades
+// on its own but the explanation is only shown once per session.
 
 const VIDEO_STALL_MS = 10000; // vault media comes off localhost; 10s is generous
 export const VIDEO_DECODE_HINT =
   "Videos aren't playing in this browser. If it's Firefox, open about:config, set " +
   "media.hardware-video-decoding.enabled to false, and restart it. This usually happens " +
   "on machines with a virtual display adapter (Parsec, Sunshine, RDP, or a VM).";
+export const VIDEO_CODEC_HINT =
+  "This browser can't decode this video's format — usually H.265/HEVC, which Firefox " +
+  "plays only with a hardware decoder. Save an H.264 copy to get a browser-safe version; " +
+  "the original file is left untouched alongside it.";
 
-let videoHintShown = false;
+const hintShown = { codec: false, stall: false };
 
-export function noteVideoDecodeFailure() {
-  if (videoHintShown) return;
-  videoHintShown = true;
-  showToast(VIDEO_DECODE_HINT, "error", 15000);
+export function noteVideoDecodeFailure(reason = "stall") {
+  if (hintShown[reason]) return;
+  hintShown[reason] = true;
+  showToast(reason === "codec" ? VIDEO_CODEC_HINT : VIDEO_DECODE_HINT, "error", 15000);
 }
 
-function replaceWithFallback(video, compact) {
+// The browser is the authority on what it can decode, so the failure event
+// itself decides which of the two cases we're in — no server-side probing.
+function failureReason(video) {
+  return video.error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED ? "codec" : "stall";
+}
+
+// "copy" is load-bearing: this adds a file rather than replacing one, and the
+// button is the only thing guaranteed to be on screen when the user decides.
+const CONVERT_LABEL = "Save an H.264 copy";
+
+function convertButton(convert) {
+  const label = el("span", {}, [CONVERT_LABEL]);
+  const icon = el("i", { className: "pi pi-sync" });
+  const btn = el("button", {
+    type: "button",
+    className: "wv-video-convert-btn",
+    title: "Re-encode a browser-safe H.264 copy. The original file is kept, untouched, alongside it.",
+  }, [icon, label]);
+
+  btn.addEventListener("click", async (e) => {
+    // These boxes sit inside clickable carousel/filmstrip cells.
+    e.preventDefault();
+    e.stopPropagation();
+    btn.disabled = true;
+    icon.className = "pi pi-spin pi-spinner";
+    label.textContent = "Converting…";
+    try {
+      const res = await VaultAPI.convertMedia(convert.entryId, convert.file);
+      const saved = res.bytes_before && res.bytes_after
+        ? ` (${formatBytes(res.bytes_before)} → ${formatBytes(res.bytes_after)})`
+        : "";
+      showToast(`Converted ${(res.codec || "video").toUpperCase()} to H.264${saved}. The original was kept.`, "success", 8000);
+      await convert.onConverted?.(res.path);
+    } catch (err) {
+      showToast(err.message, "error", 10000);
+      btn.disabled = false;
+      icon.className = "pi pi-sync";
+      label.textContent = CONVERT_LABEL;
+    }
+  });
+  return btn;
+}
+
+function replaceWithFallback(video, compact, roomy, reason, convert) {
   if (!video.parentNode) return;
+  const hint = reason === "codec" ? VIDEO_CODEC_HINT : VIDEO_DECODE_HINT;
   const children = [el("i", { className: "pi pi-exclamation-triangle" })];
   if (!compact) children.push(el("span", {}, ["Can't play this video"]));
   // Keep the original classes so the surrounding layout still sizes the box.
-  video.replaceWith(
-    el(
-      "div",
-      { className: `wv-video-failed ${video.className}`.trim(), title: VIDEO_DECODE_HINT },
-      children
-    )
-  );
+  const box = el("div", { className: `wv-video-failed ${video.className}`.trim(), title: hint }, children);
+  // Only where there's room to render it, and only when converting would help.
+  if (!compact && reason === "codec" && convert?.entryId && convert?.file) {
+    box.appendChild(convertButton(convert));
+    // These boxes inherit the size of the <video> they replace, anywhere from a
+    // full-width carousel down to a 136px grid square, so only the caller knows
+    // whether a second line fits. Everywhere else the button's own "copy"
+    // carries the meaning, with the full wording in its tooltip.
+    if (roomy) {
+      box.appendChild(el("span", { className: "wv-video-failed-note" }, ["Your original file is kept"]));
+    }
+  }
+  video.replaceWith(box);
 }
 
 /**
  * Creates a <video> that degrades visibly instead of silently. On a decode
  * error — or a load that never yields any data — the element is swapped for a
  * small "can't play" box and the fix is explained once per session.
- * Options: `onFail` takes over the failure handling (nothing is swapped);
- * `compact` drops the caption, for thumbnail-sized boxes.
+ * Options: `onFail(video, reason)` takes over the failure handling (nothing is
+ * swapped); `compact` drops the caption and convert button, for thumbnail-sized
+ * boxes; `convert` is {entryId, file, onConverted} enabling the H.264 offer;
+ * `roomy` says the box is big enough for the "original is kept" line under the
+ * convert button.
  */
-export function videoEl(props = {}, { onFail = null, compact = false } = {}) {
+export function videoEl(props = {}, { onFail = null, compact = false, roomy = false, convert = null } = {}) {
   const video = el("video", props);
   let settled = false;
   let timer = null;
@@ -86,9 +153,10 @@ export function videoEl(props = {}, { onFail = null, compact = false } = {}) {
     settled = true;
     clearTimeout(timer);
     if (!failed) return;
-    noteVideoDecodeFailure();
-    if (onFail) onFail(video);
-    else replaceWithFallback(video, compact);
+    const reason = failureReason(video);
+    noteVideoDecodeFailure(reason);
+    if (onFail) onFail(video, reason);
+    else replaceWithFallback(video, compact, roomy, reason, convert);
   };
   video.addEventListener("error", () => settle(true));
   // Any of these may be the first to fire depending on codec and browser.
@@ -132,6 +200,14 @@ export function onActivate(handler) {
       handler(e);
     }
   };
+}
+
+export function formatBytes(n) {
+  n = Math.max(0, n || 0);
+  if (n >= 1024 ** 3) return (n / 1024 ** 3).toFixed(2) + " GB";
+  if (n >= 1024 ** 2) return (n / 1024 ** 2).toFixed(1) + " MB";
+  if (n >= 1024) return (n / 1024).toFixed(0) + " KB";
+  return n + " B";
 }
 
 export function formatDate(iso) {

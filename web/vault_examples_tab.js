@@ -253,7 +253,7 @@ function renderMediaGrid(controller, entry, example, key, emptyLabel) {
       cell.draggable = false;
     });
 
-    cell.appendChild(renderMediaPreview(entry, item));
+    cell.appendChild(renderMediaPreview(controller, entry, item));
     cell.appendChild(el("div", { className: "wv-media-label" }, [item.label]));
 
     const controls = el("div", { className: "wv-media-controls" });
@@ -318,10 +318,15 @@ function enableExampleMediaDnd(controller, entry, example, inputsGrid, outputsGr
   }
 }
 
-function renderMediaPreview(entry, item) {
+function renderMediaPreview(controller, entry, item) {
   const url = VaultAPI.mediaUrl(entry.id, item.file);
   if (item.type === "image") return el("img", { src: url, className: "wv-media-thumb", alt: item.label });
-  if (item.type === "video") return videoEl({ src: url, controls: true, className: "wv-media-thumb" });
+  if (item.type === "video") {
+    return videoEl(
+      { src: url, controls: true, className: "wv-media-thumb" },
+      { convert: { entryId: entry.id, file: item.file, onConverted: () => controller.refresh() } }
+    );
+  }
   if (item.type === "audio") return el("audio", { src: url, controls: true, className: "wv-media-audio" });
   return el("div", { className: "wv-media-thumb wv-card-thumb-placeholder" }, ["?"]);
 }

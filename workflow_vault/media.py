@@ -258,6 +258,10 @@ def remove_compare_image(vault_root, slug):
     _clear_prefixed(tdir, "compare_source.")
 
 
+# Manifest keys that hold an entry-relative media path.
+MANIFEST_MEDIA_KEYS = ("thumbnail", "thumbnail_source", "compare_image", "compare_image_source")
+
+
 def _resolve_referenced_path(vault_root, slug, manifest, rel_path):
     """Return the entry-relative path for rel_path if it is referenced by
     this entry's thumbnail or example media, else None.
@@ -267,14 +271,9 @@ def _resolve_referenced_path(vault_root, slug, manifest, rel_path):
     "outputs/CLIP B.mp4"), since that's how item["file"] is stored and how
     the frontend requests it.
     """
-    if (manifest.get("thumbnail") or "").replace("\\", "/") == rel_path:
-        return rel_path
-    if (manifest.get("thumbnail_source") or "").replace("\\", "/") == rel_path:
-        return rel_path
-    if (manifest.get("compare_image") or "").replace("\\", "/") == rel_path:
-        return rel_path
-    if (manifest.get("compare_image_source") or "").replace("\\", "/") == rel_path:
-        return rel_path
+    for key in MANIFEST_MEDIA_KEYS:
+        if (manifest.get(key) or "").replace("\\", "/") == rel_path:
+            return rel_path
     for example in storage.list_examples(vault_root, slug):
         prefix = f"examples/{example['dir']}/"
         for item in example.get("inputs", []) + example.get("outputs", []):
@@ -284,8 +283,50 @@ def _resolve_referenced_path(vault_root, slug, manifest, rel_path):
     return None
 
 
-def resolve_media_path(vault_root, entry_id, rel_path):
-    """Validate entry_id/rel_path and return (abs_path, None) or (None, error)."""
+def _repoint_reference(vault_root, slug, manifest, old_rel, new_rel):
+    """Repoint whatever references old_rel (entry-relative) at new_rel, saving
+    the manifest or example.json that changed. Returns True if something was
+    updated.
+
+    Mirrors _resolve_referenced_path — the two must stay in step, since a path
+    that resolves but can't be repointed would orphan the converted file.
+    """
+    changed = False
+    for key in MANIFEST_MEDIA_KEYS:
+        if (manifest.get(key) or "").replace("\\", "/") == old_rel:
+            manifest[key] = new_rel
+            changed = True
+    if changed:
+        manifest["updated_at"] = utils.now_iso()
+        storage.write_manifest(vault_root, slug, manifest)
+        return True
+
+    for example in storage.list_examples(vault_root, slug):
+        prefix = f"examples/{example['dir']}/"
+        if not old_rel.startswith(prefix):
+            continue
+        item_rel = old_rel[len(prefix):]  # example.json stores paths example-relative
+        touched = False
+        for role in ("inputs", "outputs"):
+            for item in example.get(role, []):
+                if (item.get("file") or "").replace("\\", "/") == item_rel:
+                    item["file"] = new_rel[len(prefix):]
+                    touched = True
+        if touched:
+            edir = storage.example_dir(vault_root, slug, example["dir"])
+            saved = {k: v for k, v in example.items() if k != "dir"}
+            utils.atomic_write_json(os.path.join(edir, "example.json"), saved)
+            return True
+    return False
+
+
+def resolve_media_ref(vault_root, entry_id, rel_path):
+    """Validate entry_id/rel_path and locate the file it refers to.
+
+    Returns (info, None) or (None, error), where info carries the slug,
+    manifest, entry-relative path and absolute path. Callers that only need the
+    path on disk should use resolve_media_path.
+    """
     if not entry_id:
         return None, "entry_id is required."
     if not rel_path:
@@ -315,4 +356,86 @@ def resolve_media_path(vault_root, entry_id, rel_path):
     if not os.path.isfile(abs_path):
         return None, "File not found."
 
-    return abs_path, None
+    return {"slug": slug, "manifest": manifest, "rel": resolved, "abs": abs_path}, None
+
+
+def resolve_media_path(vault_root, entry_id, rel_path):
+    """Validate entry_id/rel_path and return (abs_path, None) or (None, error)."""
+    info, err = resolve_media_ref(vault_root, entry_id, rel_path)
+    return (None, err) if err else (info["abs"], None)
+
+
+# --- Browser-safe H.264 conversion -----------------------------------------
+# Offered when a browser reports it can't decode a video (typically H.265/HEVC
+# in Firefox). The converted copy is written ALONGSIDE the original rather than
+# over it: the re-encode is lossy and often drops 10-bit to 8-bit, so the
+# original stays on disk and the change is reversible by hand.
+
+def plan_h264_conversion(vault_root, entry_id, rel_path):
+    """Validate a conversion request and choose the destination filename.
+
+    Returns (plan, None) or (None, error). Deliberately does no work and takes
+    no lock — the caller runs the encode off the event loop, then calls
+    finish_h264_conversion to repoint the entry at the result.
+    """
+    info, err = resolve_media_ref(vault_root, entry_id, rel_path)
+    if err:
+        return None, err
+    if ext_of(info["abs"]) not in VIDEO_EXTS:
+        return None, "That file is not a video."
+    if not video.ffmpeg_available():
+        return None, "Video conversion is unavailable (ffmpeg not found)."
+
+    codec = video.probe_video_codec(info["abs"])
+    if codec == "h264":
+        return None, "This video is already H.264 — converting it again would only lose quality."
+
+    edir = storage.entry_dir(vault_root, info["slug"])
+    src_dir, src_name = os.path.split(info["rel"])
+    base = os.path.splitext(src_name)[0]
+    dest_name = _unique_filename(os.path.join(edir, src_dir), f"{base}_h264.mp4")
+    dest_rel = f"{src_dir}/{dest_name}" if src_dir else dest_name
+    return {
+        "slug": info["slug"],
+        "codec": codec,
+        "src_rel": info["rel"],
+        "src_abs": info["abs"],
+        "dest_rel": dest_rel,
+        "dest_abs": os.path.join(edir, dest_rel),
+    }, None
+
+
+def finish_h264_conversion(vault_root, entry_id, plan):
+    """Point the entry at the converted file. Returns (result, None) or
+    (None, error). Call under the vault write lock, after the encode."""
+    if not os.path.isfile(plan["dest_abs"]):
+        return None, "The converted video is missing."
+
+    def _discard():
+        try:
+            os.remove(plan["dest_abs"])
+        except OSError:
+            pass
+
+    # The entry may have been edited while the encode ran, so re-resolve rather
+    # than trusting the plan's stale manifest.
+    info, err = resolve_media_ref(vault_root, entry_id, plan["src_rel"])
+    if err:
+        _discard()
+        return None, f"The original video is no longer available ({err[0].lower()}{err[1:]})"
+
+    if not _repoint_reference(vault_root, info["slug"], info["manifest"],
+                              plan["src_rel"], plan["dest_rel"]):
+        _discard()
+        return None, "Could not update the entry to use the converted video."
+
+    # Carry the source's dates over so the vault keeps sorting by when the
+    # media was actually made, not when it happened to be converted.
+    try:
+        utils.set_file_times(plan["dest_abs"], os.path.getmtime(plan["src_abs"]),
+                             ctime=os.path.getctime(plan["src_abs"]))
+        before = os.path.getsize(plan["src_abs"])
+        after = os.path.getsize(plan["dest_abs"])
+    except OSError:
+        before = after = 0
+    return {"path": plan["dest_rel"], "bytes_before": before, "bytes_after": after}, None

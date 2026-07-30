@@ -104,6 +104,8 @@ export const VaultAPI = {
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/open-folder`, {}),
   revealMedia: (entryId, relPath) =>
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/reveal-media`, { path: relPath }),
+  convertMedia: (entryId, relPath) =>
+    postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/convert-media`, { path: relPath }),
 
   createVersion: (entryId, body) =>
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/versions`, body),

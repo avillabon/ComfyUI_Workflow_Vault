@@ -2157,6 +2157,39 @@
   padding: 4px;
 }
 
+/* Offered inside the "can't play" box when the failure was an unsupported
+   codec — the one case re-encoding actually fixes. */
+.wv-video-convert-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 5px 11px;
+  background: var(--wv-accent);
+  border: none;
+  border-radius: var(--wv-radius);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.wv-video-convert-btn:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+.wv-video-convert-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+/* Dropped by videoEl when the box is too small to hold it (see
+   replaceWithFallback), so it must not itself force the box to grow. */
+.wv-video-failed-note {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
 .wv-ex-main audio {
   width: 100%;
 }

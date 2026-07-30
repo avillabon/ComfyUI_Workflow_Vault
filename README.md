@@ -266,11 +266,34 @@ Vault Settings (⚙) is organized into three tabs:
 
 ## Troubleshooting
 
+### A video shows "Can't play this video" with a Save an H.264 copy button
+
+The browser reported it can't decode that file's format at all. The usual cause
+is **H.265/HEVC**: Firefox on Windows plays it only through a hardware decoder
+and has no software fallback, so an HEVC output plays fine in Chrome and shows
+nothing in Firefox. 10-bit HEVC (`yuv420p10le`) is what ComfyUI writes when a
+Video Combine node is set to `h265-mp4`.
+
+Click **Save an H.264 copy** on the failed player. The vault re-encodes the clip
+to 8-bit H.264 — the one profile every browser decodes — and points the entry at
+the copy. The conversion:
+
+- **keeps the original file** on disk next to the copy (`clip.mp4` →
+  `clip_h264.mp4`), because re-encoding is lossy and drops 10-bit to 8-bit;
+- **preserves the embedded ComfyUI workflow** byte-for-byte, so the converted
+  file is still drag-droppable onto the canvas;
+- keeps the original's modified/created dates, so sorting doesn't change.
+
+It needs ffmpeg (bundled via `imageio-ffmpeg`). To avoid the problem at the
+source, set your Video Combine node's format to `h264-mp4` rather than
+`h265-mp4`.
+
 ### Example videos show playback controls but won't play (stuck at 0:00 / 0:00)
 
-Videos load but never show a frame — blank player, black thumbnails in the
-example filmstrip, no error message. Images in the same entry load fine, and the
-same vault plays normally in Chrome or Edge.
+This is the *other* video failure, and Convert won't help — the format is fine,
+decoding just never starts. Videos load but never show a frame: blank player,
+black thumbnails in the example filmstrip, no error message. Images in the same
+entry load fine, and the same vault plays normally in Chrome or Edge.
 
 This is a browser video-decoding problem, not a vault problem. It shows up on
 machines that have a **virtual display adapter** installed — Parsec, Sunshine /

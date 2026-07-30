@@ -1,16 +1,18 @@
-"""Convert a short video (MP4/MOV/WebM) into an animated WebP thumbnail.
+"""Video helpers: animated-WebP thumbnails, and re-encoding to browser-safe H.264.
 
 ffmpeg does the work; we resolve its binary from imageio-ffmpeg (a bundled,
 cross-platform static build — no system install) and fall back to a system
-ffmpeg on PATH if present.
+ffmpeg on PATH if present. Note that imageio-ffmpeg ships ffmpeg ONLY — there is
+no ffprobe — so stream inspection parses `ffmpeg -i` output instead.
 
-The output profile is intentionally hardcoded (no user-facing settings):
-fit within a 512px box (never upscaled), 18 fps, only the first 5 seconds, and
-an infinite loop — tuned to land around 1-2 MB. The 5-second cap is a guardrail
-so dropping a 60-second clip can't produce a giant thumbnail.
+The thumbnail output profile is intentionally hardcoded (no user-facing
+settings): fit within a 512px box (never upscaled), 18 fps, only the first 5
+seconds, and an infinite loop — tuned to land around 1-2 MB. The 5-second cap is
+a guardrail so dropping a 60-second clip can't produce a giant thumbnail.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -24,6 +26,20 @@ COMPRESSION_LEVEL = 6  # libwebp method (0-6); higher = slower/smaller
 CONVERT_TIMEOUT = 120  # seconds before we give up on a stuck ffmpeg
 
 VIDEO_EXTS = {"mp4", "mov", "webm"}
+
+# --- Browser-safe H.264 re-encode ------------------------------------------
+# Browsers differ in what they can decode, and the gap is not small. Firefox on
+# Windows plays H.265/HEVC only through a hardware decoder with no software
+# fallback, so an HEVC output that plays fine in Chrome shows nothing at all
+# there. H.264 in 8-bit yuv420p is the one profile every browser decodes, so
+# that's what we convert to.
+H264_CRF = 20          # visually near-transparent; lands ~1.5x the HEVC source
+H264_PRESET = "medium"
+H264_TIMEOUT = 1800    # 30 min — a long 4K clip is slow but must not hang forever
+
+# Matches the codec name in an `ffmpeg -i` stream line, e.g.
+#   Stream #0:0[0x1](und): Video: hevc (Main 10) (hev1 / 0x31766568), ...
+_VIDEO_STREAM_RE = re.compile(r"^\s*Stream #\d+:\d+.*?: Video: ([A-Za-z0-9_]+)", re.M)
 
 _ffmpeg_path = None
 _ffmpeg_resolved = False
@@ -107,3 +123,81 @@ def convert_to_animated_webp(data, src_ext):
         return None
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def probe_video_codec(path):
+    """Return the first video stream's codec name (lowercase), or None.
+
+    imageio-ffmpeg bundles no ffprobe, so this reads the stream summary ffmpeg
+    prints to stderr when given an input and no output. That call exits
+    non-zero by design ("At least one output file must be specified"), so the
+    return code is deliberately ignored.
+    """
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg or not os.path.isfile(path):
+        return None
+    try:
+        proc = subprocess.run(
+            [ffmpeg, "-hide_banner", "-i", path], capture_output=True, timeout=60
+        )
+    except Exception:  # pragma: no cover - defensive (timeout / OS error)
+        return None
+    match = _VIDEO_STREAM_RE.search(proc.stderr.decode("utf-8", "replace"))
+    return match.group(1).lower() if match else None
+
+
+def convert_to_h264(src_path, dest_path):
+    """Re-encode a video to browser-safe H.264 at dest_path.
+
+    Returns (True, None) on success or (False, message). The video is re-encoded
+    (lossy) but the container metadata is carried across intact — which matters
+    because ComfyUI stores the whole graph in the `workflow`/`prompt` tags, and
+    a file that loses them can no longer be dragged back onto the canvas.
+
+    `-map_metadata 0` alone is NOT enough: the mov/mp4 muxer silently drops tags
+    it doesn't recognise unless `use_metadata_tags` is also set. Both together
+    carry `workflow`/`prompt` through byte-for-byte.
+
+    Audio is copied rather than re-encoded (AAC, Opus and PCM all mux into MP4
+    as-is), and `-map 0:a?` keeps the command working on silent clips.
+    """
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        return False, "Video conversion is unavailable (ffmpeg not found)."
+
+    # Write beside the destination so the rename below stays on one filesystem,
+    # and no half-written file is ever visible under the real name.
+    tmp_path = dest_path + ".part.mp4"
+    cmd = [
+        ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+        "-i", src_path,
+        "-map", "0:v", "-map", "0:a?",   # all video + audio; drop data/subtitles
+        "-map_metadata", "0",
+        "-movflags", "use_metadata_tags",  # required, or custom tags are dropped
+        "-c:v", "libx264",
+        "-preset", H264_PRESET,
+        "-crf", str(H264_CRF),
+        "-pix_fmt", "yuv420p",           # 8-bit 4:2:0 — universally decodable
+        "-c:a", "copy",
+        tmp_path,
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=H264_TIMEOUT)
+        if proc.returncode != 0 or not os.path.isfile(tmp_path):
+            lines = proc.stderr.decode("utf-8", "replace").strip().splitlines()
+            msg = "ffmpeg could not convert this video."
+            if lines:
+                msg += f" {lines[-1].strip()}"
+            return False, msg
+        os.replace(tmp_path, dest_path)
+        return True, None
+    except subprocess.TimeoutExpired:
+        return False, "Conversion timed out."
+    except OSError as e:
+        return False, f"Could not write the converted video: {e}"
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass

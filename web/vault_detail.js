@@ -113,7 +113,7 @@ function dateOnly(iso) {
 function renderOverviewTab(controller, entry) {
   const wrap = el("div", { className: "wv-overview" });
   wrap.appendChild(renderOverviewSummary(controller, entry));
-  wrap.appendChild(renderExampleGallerySection(entry));
+  wrap.appendChild(renderExampleGallerySection(controller, entry));
   return wrap;
 }
 
@@ -562,7 +562,7 @@ function exampleMediaItems(example) {
   return items;
 }
 
-function renderExampleGallerySection(entry) {
+function renderExampleGallerySection(controller, entry) {
   const section = el("div", { className: "wv-overview-gallery-section" });
   const examples = (entry.examples || []).filter((ex) => (ex.inputs?.length || ex.outputs?.length));
 
@@ -577,7 +577,7 @@ function renderExampleGallerySection(entry) {
 
   const grid = el("div", { className: "wv-ex-gallery" });
   for (const example of examples) {
-    grid.appendChild(renderExampleGalleryCard(entry, example));
+    grid.appendChild(renderExampleGalleryCard(controller, entry, example));
   }
   section.appendChild(grid);
   return section;
@@ -613,7 +613,7 @@ function renderExampleNotes(markdownText) {
   return root;
 }
 
-function renderExampleGalleryCard(entry, example) {
+function renderExampleGalleryCard(controller, entry, example) {
   const items = exampleMediaItems(example);
   const card = el("div", { className: "wv-ex-card" });
 
@@ -685,7 +685,7 @@ function renderExampleGalleryCard(entry, example) {
     currentIdx = (idx + items.length) % items.length;
     const { item, role } = items[currentIdx];
     clear(main);
-    main.appendChild(renderCarouselMedia(entry, item));
+    main.appendChild(renderCarouselMedia(controller, entry, item));
     roleLabel.style.display = "";
     roleLabel.textContent = role;
     // The file already lives on disk in the vault — reveal it in the OS file
@@ -812,12 +812,19 @@ function renderCompareSlider(entry, inputItem, outputItem) {
   return wrap;
 }
 
-function renderCarouselMedia(entry, item) {
+function renderCarouselMedia(controller, entry, item) {
   const url = VaultAPI.mediaUrl(entry.id, item.file);
   if (item.type === "image") {
     return el("img", { src: url, alt: item.label, className: "wv-carousel-image", onclick: () => openImageLightbox(url, item.label) });
   }
-  if (item.type === "video") return videoEl({ src: url, controls: true });
+  if (item.type === "video") {
+    return videoEl(
+      { src: url, controls: true },
+      // A refresh re-reads state from the server, which now points the example
+      // at the converted file — no need to patch the item in place.
+      { roomy: true, convert: { entryId: entry.id, file: item.file, onConverted: () => controller.refresh() } }
+    );
+  }
   if (item.type === "audio") return el("audio", { src: url, controls: true });
   return el("div", { className: "wv-gallery-item-icon" }, [el("i", { className: "pi pi-file" })]);
 }

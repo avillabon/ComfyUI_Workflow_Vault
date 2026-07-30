@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 from aiohttp import web
 from server import PromptServer
 
-from . import config, entries, examples, exporting, folders, media, storage, utils, versions
+from . import config, entries, examples, exporting, folders, media, storage, utils, versions, video
 
 routes = PromptServer.instance.routes
 
@@ -608,6 +608,44 @@ async def post_reveal_media(request):
     if not ok:
         return _error(rerr)
     return web.json_response({"ok": True})
+
+
+@_post("/workflow-vault/entries/{entry_id}/convert-media")
+async def post_convert_media(request):
+    """Re-encode an undecodable video to browser-safe H.264, alongside the original.
+
+    The encode runs off the event loop and OUTSIDE the vault write lock — it
+    only writes a brand-new file nothing references yet, and a long 4K clip
+    would otherwise stall every other tab's writes for minutes. Only the
+    reference update needs the lock.
+    """
+    vault_root, err = _require_vault()
+    if err:
+        return err
+    entry_id = request.match_info["entry_id"]
+    slug, manifest, err = _require_entry(vault_root, entry_id)
+    if err:
+        return err
+    body, err = await _read_json(request)
+    if err:
+        return err
+
+    plan, err_msg = media.plan_h264_conversion(vault_root, entry_id, body.get("path"))
+    if err_msg:
+        return _error(err_msg)
+
+    ok, cerr = await asyncio.to_thread(video.convert_to_h264, plan["src_abs"], plan["dest_abs"])
+    if not ok:
+        return _error(cerr)
+
+    async with _write_lock(vault_root):
+        result, err_msg = await asyncio.to_thread(
+            media.finish_h264_conversion, vault_root, entry_id, plan
+        )
+        if err_msg:
+            return _error(err_msg)
+        return web.json_response({"ok": True, "codec": plan["codec"], **result,
+                                  **_full_state(vault_root)})
 
 
 @_post("/workflow-vault/entries/{entry_id}/open-folder")

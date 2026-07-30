@@ -1,49 +1,17 @@
 // Examples tab: reference media (inputs/outputs) plus notes for each
 // example, with simple add/edit/reorder/delete management.
 
-import { el, clear, videoEl, showToast, confirmDialog, promptDialog, formDialog, createProgressStatus } from "./vault_dom.js";
+import { el, videoEl, showToast, confirmDialog, promptDialog, formDialog, createProgressStatus } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
 import { renderMarkdown } from "./vault_markdown.js";
-import { renderMediaPicker } from "./vault_media_picker.js";
+import { renderMediaPicker, convertFlaggedMedia } from "./vault_media_picker.js";
 
 export function renderExamplesTab(controller, entry) {
   const wrap = el("div", { className: "wv-examples-tab" });
-
-  const addFormContainer = el("div", { className: "wv-add-example-form" });
-  addFormContainer.style.display = "none";
-
-  const toggleBtn = el(
-    "button",
-    {
-      className: "wv-btn wv-section-action",
-      onclick: async () => {
-        if (addFormContainer.style.display === "none") {
-          clear(addFormContainer);
-          addFormContainer.appendChild(
-            renderAddExampleForm(controller, entry, () => {
-              addFormContainer.style.display = "none";
-              clear(addFormContainer);
-            })
-          );
-          addFormContainer.style.display = "";
-        } else {
-          const proceed = await controller.checkDirty();
-          if (!proceed) return;
-          controller.setDirty(false);
-          addFormContainer.style.display = "none";
-          clear(addFormContainer);
-        }
-      },
-    },
-    [el("i", { className: "pi pi-plus" }), "Add example"]
-  );
-  wrap.appendChild(toggleBtn);
-  wrap.appendChild(addFormContainer);
+  wrap.appendChild(renderNewExampleSlot(controller, entry));
 
   const examples = entry.examples || [];
-  if (examples.length === 0) {
-    wrap.appendChild(el("p", { className: "wv-muted" }, ["No examples yet."]));
-  } else {
+  if (examples.length) {
     const listEl = el("div", { className: "wv-examples-list" });
     examples.forEach((example, idx) => {
       listEl.appendChild(renderExampleCard(controller, entry, example, idx, examples.length));
@@ -70,100 +38,95 @@ async function moveExample(controller, entry, example, direction) {
   }
 }
 
-function formRow(label, input) {
-  return el("div", { className: "wv-form-row" }, [el("label", {}, [label]), input]);
-}
-
 // ---------------------------------------------------------------------------
-// Add example
+// New example slot: an always-present, unsaved drop target at the top of the
+// list. Nothing is persisted until media actually lands in it, so an empty
+// slot never becomes a real (and therefore carousel-visible) example. A short
+// debounce coalesces bursts like "Import from workflow" (which can add inputs
+// and outputs in quick succession) into a single create call. A freshly-found
+// H.265 file gets a much longer grace period instead — a plain 400ms would
+// auto-save (and reset the slot) before the warning badge and its convert
+// toggle were even visible long enough to click.
 // ---------------------------------------------------------------------------
 
-function renderAddExampleForm(controller, entry, onClose) {
-  const form = el("div", { className: "wv-form wv-inline-form" });
-  const closeCleanly = () => {
-    controller.setDirty(false);
-    onClose();
-  };
-  const markDirty = () => controller.setDirty(true, {
-    saveHandler: () => saveExample({ closeAfterSave: false }),
-    discardHandler: onClose,
-    dialog: {
-      title: "Save example before leaving?",
-      message: "You have an unsaved example.",
-      saveText: "Create example",
-      discardText: "Discard",
-    },
-  });
+const NEW_EXAMPLE_COMMIT_DELAY = 400;
+const HEVC_GRACE_DELAY = 4000;
 
-  const titleInput = el("input", { className: "wv-input", type: "text", placeholder: "Title (optional)" });
-  const notesInput = el("textarea", { className: "wv-input wv-textarea", placeholder: "Notes (optional, Markdown supported)" });
-  const picker = renderMediaPicker({ preview: true, onChange: markDirty });
-  titleInput.addEventListener("input", markDirty);
-  notesInput.addEventListener("input", markDirty);
-
-  form.appendChild(formRow("Title", titleInput));
-  form.appendChild(formRow("Notes", notesInput));
-  form.appendChild(formRow("Media", picker.element));
-
-  const actions = el("div", { className: "wv-form-actions" });
-  const progress = createProgressStatus();
-  const createBtn = el(
-    "button",
-    {
-      className: "wv-btn wv-btn-primary",
-      onclick: () => saveExample({ closeAfterSave: true }),
-    },
-    ["Create Example"]
+function renderNewExampleSlot(controller, entry) {
+  const card = el("div", { className: "wv-example-card wv-example-new" });
+  card.appendChild(
+    el("div", { className: "wv-example-header" }, [
+      el("i", { className: "pi pi-plus wv-example-new-icon" }),
+      el("div", { className: "wv-example-title wv-example-title-empty" }, ["New example"]),
+    ])
   );
-  async function saveExample({ closeAfterSave = true } = {}) {
+
+  let committing = false;
+  let timer = null;
+  const progress = createProgressStatus();
+
+  async function commit() {
+    if (committing || picker.isEmpty()) return;
     if (!(entry.versions || []).length) {
       showToast("This entry has no versions to attach an example to.", "error");
-      return false;
+      return;
     }
-    createBtn.disabled = true;
+    committing = true;
     progress.reset();
+    await picker.awaitPendingProbes();
+    const priorIds = new Set((entry.examples || []).map((e) => e.id));
+    const inputFiles = picker.getByRole("input");
+    const outputFiles = picker.getByRole("output");
+    const inputFlags = picker.getConvertFlags("input");
+    const outputFlags = picker.getConvertFlags("output");
     try {
       const formData = new FormData();
       const mtimes = {};
-      picker.getByRole("input").forEach((f, i) => {
+      inputFiles.forEach((f, i) => {
         formData.append(`input_${i}`, f);
         mtimes[`input_${i}`] = f.lastModified;
       });
-      picker.getByRole("output").forEach((f, i) => {
+      outputFiles.forEach((f, i) => {
         formData.append(`output_${i}`, f);
         mtimes[`output_${i}`] = f.lastModified;
       });
-      formData.append(
-        "data",
-        JSON.stringify({
-          title: titleInput.value,
-          notes: notesInput.value,
-          file_mtimes: mtimes,
-        })
-      );
+      formData.append("data", JSON.stringify({ file_mtimes: mtimes }));
       const result = await VaultAPI.createExample(entry.id, formData, { onProgress: (event) => progress.update(event) });
-      controller.setDirty(false);
-      await controller.refresh();
-      showToast("Example added.", "success");
       if (result.skipped_files?.length) {
         showToast(`Skipped unsupported file(s): ${result.skipped_files.join(", ")}`, "warn");
       }
-      if (closeAfterSave) closeCleanly();
-      return true;
+      await controller.refresh();
+      const newExample = (result.examples || []).find((e) => !priorIds.has(e.id));
+      if (newExample) {
+        const convertedInputs = await convertFlaggedMedia(entry.id, newExample.inputs || [], inputFiles, inputFlags);
+        const convertedOutputs = await convertFlaggedMedia(entry.id, newExample.outputs || [], outputFiles, outputFlags);
+        if (convertedInputs || convertedOutputs) await controller.refresh();
+      }
     } catch (e) {
       showToast(e.message, "error");
-      return false;
+      committing = false;
     } finally {
-      createBtn.disabled = false;
       progress.reset();
     }
   }
-  actions.appendChild(createBtn);
-  actions.appendChild(progress.element);
-  actions.appendChild(el("button", { className: "wv-btn", onclick: closeCleanly }, ["Cancel"]));
-  form.appendChild(actions);
 
-  return form;
+  const picker = renderMediaPicker({
+    preview: true,
+    onChange: (info) => {
+      if (committing) return;
+      clearTimeout(timer);
+      timer = setTimeout(commit, info?.longDelay ? HEVC_GRACE_DELAY : NEW_EXAMPLE_COMMIT_DELAY);
+    },
+  });
+
+  card.appendChild(picker.element);
+  card.appendChild(progress.element);
+  card.appendChild(
+    el("div", { className: "wv-example-new-note" }, [
+      "Nothing is saved here until a file lands — drop, paste, or import from the workflow.",
+    ])
+  );
+  return card;
 }
 
 // ---------------------------------------------------------------------------
@@ -333,43 +296,68 @@ function renderMediaPreview(controller, entry, item) {
 
 function renderAddMediaRow(controller, entry, example) {
   // Two zones, aligned under the Inputs / Outputs columns above. Dropping or
-  // browsing in a zone uploads straight away with that section's role.
+  // browsing in a zone uploads with that section's role, after a short
+  // debounce (longer if the file just turned out to be H.265 — see the
+  // HEVC_GRACE_DELAY comment on the new-example slot above).
   const row = el("div", { className: "wv-add-media-row wv-example-io" });
 
   const makeZone = (role, label) => {
     let uploading = false;
+    let timer = null;
     const progress = createProgressStatus();
+
+    async function upload() {
+      if (uploading || picker.isEmpty()) return;
+      uploading = true;
+      progress.reset();
+      await picker.awaitPendingProbes();
+      const priorInputIds = new Set((example.inputs || []).map((m) => m.id));
+      const priorOutputIds = new Set((example.outputs || []).map((m) => m.id));
+      const inputFiles = picker.getByRole("input");
+      const outputFiles = picker.getByRole("output");
+      const inputFlags = picker.getConvertFlags("input");
+      const outputFlags = picker.getConvertFlags("output");
+      try {
+        const formData = new FormData();
+        const mtimes = {};
+        inputFiles.forEach((f, i) => {
+          formData.append(`new_input_${i}`, f);
+          mtimes[`new_input_${i}`] = f.lastModified;
+        });
+        outputFiles.forEach((f, i) => {
+          formData.append(`new_output_${i}`, f);
+          mtimes[`new_output_${i}`] = f.lastModified;
+        });
+        formData.append("data", JSON.stringify({ file_mtimes: mtimes }));
+        const result = await VaultAPI.updateExample(entry.id, example.id, formData, { onProgress: (event) => progress.update(event) });
+        showToast("Media added.", "success");
+        if (result.skipped_files?.length) {
+          showToast(`Skipped unsupported file(s): ${result.skipped_files.join(", ")}`, "warn");
+        }
+        await controller.refresh();
+        const updated = (result.examples || []).find((e) => e.id === example.id);
+        if (updated) {
+          const newInputs = (updated.inputs || []).filter((m) => !priorInputIds.has(m.id));
+          const newOutputs = (updated.outputs || []).filter((m) => !priorOutputIds.has(m.id));
+          const convertedInputs = await convertFlaggedMedia(entry.id, newInputs, inputFiles, inputFlags);
+          const convertedOutputs = await convertFlaggedMedia(entry.id, newOutputs, outputFiles, outputFlags);
+          if (convertedInputs || convertedOutputs) await controller.refresh();
+        }
+      } catch (e) {
+        showToast(e.message, "error");
+        uploading = false;
+      } finally {
+        progress.reset();
+      }
+    }
+
     const picker = renderMediaPicker({
       role,
       label,
-      onChange: async () => {
-        if (uploading || picker.isEmpty()) return;
-        uploading = true;
-        progress.reset();
-        try {
-          const formData = new FormData();
-          const mtimes = {};
-          picker.getByRole("input").forEach((f, i) => {
-            formData.append(`new_input_${i}`, f);
-            mtimes[`new_input_${i}`] = f.lastModified;
-          });
-          picker.getByRole("output").forEach((f, i) => {
-            formData.append(`new_output_${i}`, f);
-            mtimes[`new_output_${i}`] = f.lastModified;
-          });
-          formData.append("data", JSON.stringify({ file_mtimes: mtimes }));
-          const result = await VaultAPI.updateExample(entry.id, example.id, formData, { onProgress: (event) => progress.update(event) });
-          showToast("Media added.", "success");
-          if (result.skipped_files?.length) {
-            showToast(`Skipped unsupported file(s): ${result.skipped_files.join(", ")}`, "warn");
-          }
-          await controller.refresh();
-        } catch (e) {
-          showToast(e.message, "error");
-          uploading = false;
-        } finally {
-          progress.reset();
-        }
+      onChange: (info) => {
+        if (uploading) return;
+        clearTimeout(timer);
+        timer = setTimeout(upload, info?.longDelay ? HEVC_GRACE_DELAY : NEW_EXAMPLE_COMMIT_DELAY);
       },
     });
     return el("div", { className: "wv-example-io-col" }, [picker.element, progress.element]);

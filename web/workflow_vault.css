@@ -619,6 +619,46 @@
   color: var(--wv-accent-fg);
 }
 
+.wv-mp-codec-warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--wv-star);
+}
+
+.wv-mp-convert-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--wv-border-strong);
+  border-radius: var(--wv-radius);
+  background: transparent;
+  color: var(--wv-muted);
+  cursor: pointer;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.wv-mp-convert-toggle:hover {
+  border-color: var(--wv-star);
+  color: var(--wv-fg);
+}
+
+.wv-mp-convert-toggle-active {
+  background: var(--wv-star);
+  border-color: var(--wv-star);
+  color: #1a1300;
+}
+
+.wv-mp-convert-toggle-active:hover {
+  background: var(--wv-star-hover);
+  border-color: var(--wv-star-hover);
+  color: #1a1300;
+}
+
 .wv-mp-add {
   border: 1px dashed var(--wv-border-strong);
   border-radius: var(--wv-radius);
@@ -2646,12 +2686,24 @@
   gap: 12px;
 }
 
-.wv-add-example-form,
-.wv-inline-form {
-  border: 1px solid var(--wv-border);
-  border-radius: var(--wv-radius);
-  padding: 12px;
-  background: var(--wv-card-bg);
+.wv-example-new {
+  border-style: dashed;
+  border-color: var(--wv-border-strong);
+  background: transparent;
+}
+
+.wv-example-new .wv-example-header {
+  color: var(--wv-muted);
+}
+
+.wv-example-new-icon {
+  font-size: 13px;
+  color: var(--wv-muted);
+}
+
+.wv-example-new-note {
+  font-size: 11px;
+  color: var(--wv-faint);
 }
 
 .wv-examples-list {

@@ -6,7 +6,7 @@ import { VaultAPI } from "./vault_api.js";
 import { STATUS_LABELS, STATUS_ORDER, renderGenTypePicker } from "./vault_modal.js";
 import { renderTagInput, tagCountsFrom } from "./vault_tag_input.js";
 import { renderThumbnailField } from "./vault_thumbnail_input.js";
-import { renderMediaPicker } from "./vault_media_picker.js";
+import { renderMediaPicker, convertFlaggedMedia } from "./vault_media_picker.js";
 import { renderNotesEditor } from "./vault_notes_editor.js";
 import { getCurrentWorkflowJSON, getWorkflowVaultOrigin, getCurrentWorkflowName } from "./vault_workflow.js";
 
@@ -317,6 +317,10 @@ function renderCreateForm(controller) {
     setSaving(true);
     status.textContent = "";
     progress.reset();
+    // A codec probe on a just-dropped video could still be in flight if Save
+    // is clicked immediately — wait it out so getConvertFlags() below always
+    // reflects the file's actual, resolved codec state.
+    await Promise.all(exampleBlocks.map((blk) => blk.picker.awaitPendingProbes()));
     try {
       const data = {
         name,
@@ -354,16 +358,29 @@ function renderCreateForm(controller) {
       }
 
       const examplesData = [];
+      // Parallel to examplesData — the files/flags behind each non-empty
+      // block, in the same filtered order the backend produces entry.examples
+      // in, so they can be zipped together once the entry comes back to fire
+      // off any "Convert to H.264" requests.
+      const exampleFileSets = [];
       let exampleIdx = 0;
       for (const blk of exampleBlocks) {
         if (blk.picker.isEmpty()) continue;
         examplesData.push({ notes: blk.notesInput.value });
-        blk.picker.getByRole("input").forEach((f, i) => {
+        const inputFiles = blk.picker.getByRole("input");
+        const outputFiles = blk.picker.getByRole("output");
+        exampleFileSets.push({
+          inputFiles,
+          outputFiles,
+          inputFlags: blk.picker.getConvertFlags("input"),
+          outputFlags: blk.picker.getConvertFlags("output"),
+        });
+        inputFiles.forEach((f, i) => {
           const name = `example_${exampleIdx}_input_${i}`;
           formData.append(name, f);
           mtimes[name] = f.lastModified;
         });
-        blk.picker.getByRole("output").forEach((f, i) => {
+        outputFiles.forEach((f, i) => {
           const name = `example_${exampleIdx}_output_${i}`;
           formData.append(name, f);
           mtimes[name] = f.lastModified;
@@ -385,6 +402,20 @@ function renderCreateForm(controller) {
       // Best-effort media (archival originals, the compare overlay) that could
       // not be saved — the entry itself is fine, but the user must be told.
       for (const warning of entry.warnings || []) showToast(warning, "warn", 8000);
+
+      // The backend builds entry.examples from examplesData in the same
+      // filtered order, so zipping by position is safe here (unlike an
+      // update, there's no pre-existing state to disambiguate against).
+      let converted = false;
+      for (let i = 0; i < exampleFileSets.length; i++) {
+        const saved = entry.examples?.[i];
+        if (!saved) continue;
+        const { inputFiles, outputFiles, inputFlags, outputFlags } = exampleFileSets[i];
+        const c1 = await convertFlaggedMedia(entry.id, saved.inputs || [], inputFiles, inputFlags);
+        const c2 = await convertFlaggedMedia(entry.id, saved.outputs || [], outputFiles, outputFlags);
+        converted = converted || c1 || c2;
+      }
+      if (converted) await controller.refresh();
       return true;
     } catch (e) {
       status.textContent = e.message;

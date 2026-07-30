@@ -12,6 +12,8 @@
 import { el, clear, videoEl, showToast, confirmDialog } from "./vault_dom.js";
 import { canvasAvailable, detectCanvasMedia, fetchCanvasFile } from "./vault_canvas_media.js";
 import { onPasteInto, renderPasteButton } from "./vault_clipboard.js";
+import { probeVideoCodec } from "./vault_codec_probe.js";
+import { VaultAPI } from "./vault_api.js";
 
 export const MEDIA_ACCEPT = ".png,.jpg,.jpeg,.webp,.gif,.mp4,.mov,.webm,.wav,.mp3,.m4a,.flac,.ogg";
 const MEDIA_EXTS = MEDIA_ACCEPT.split(",").map((e) => e.replace(".", "").trim());
@@ -67,21 +69,51 @@ export function renderMediaPicker({ accept = MEDIA_ACCEPT, onChange, preview = f
     return true;
   }
 
+  function isProbeCandidate(entry) {
+    return kindOf(entry.file.name) === "video" && ["mp4", "mov"].includes(extOf(entry.file.name));
+  }
+
+  // Probes a freshly-added video for H.265/HEVC in the background and
+  // re-renders once known. Silently no-ops for images/audio, non-MP4/MOV
+  // containers, and anything that fails to parse. Callers that auto-commit on
+  // a debounce (the examples ghost slot, per-example add zones, the wizard)
+  // treat any onChange while a probe is still pending — or once one comes
+  // back positive — as a request for a much longer delay via { longDelay:
+  // true }. A plain 400ms coalescing delay would otherwise race the probe:
+  // if it lost, the batch would auto-upload before the codec was even known,
+  // let alone before the warning badge and its convert toggle were visible
+  // long enough to click.
+  function probeIfVideo(entry) {
+    if (!isProbeCandidate(entry)) return;
+    entry.probeDone = probeVideoCodec(entry.file).then((codec) => {
+      if (!media.includes(entry)) return; // removed before the probe resolved
+      if (codec === "hevc") {
+        entry.hevc = true;
+        renderUI();
+        onChange?.({ longDelay: true });
+      }
+    });
+  }
+
   async function addFiles(fileList, role = "output") {
     const big = [];
     let added = 0;
+    const newlyAdded = [];
     for (const file of Array.from(fileList || [])) {
       if (!validate(file)) continue; // rejects wrong type / over the hard limit
       if (file.size > WARN_MEDIA_BYTES) {
         big.push(file);
         continue;
       }
-      media.push({ file, role });
+      const entry = { file, role };
+      media.push(entry);
+      newlyAdded.push(entry);
       added++;
     }
     if (added) {
       renderUI();
-      onChange?.();
+      onChange?.(newlyAdded.some(isProbeCandidate) ? { longDelay: true } : undefined);
+      newlyAdded.forEach(probeIfVideo);
     }
 
     if (big.length) {
@@ -96,9 +128,11 @@ export function renderMediaPicker({ accept = MEDIA_ACCEPT, onChange, preview = f
         cancelText: "Skip",
       });
       if (ok) {
-        for (const f of big) media.push({ file: f, role });
+        const bigEntries = big.map((f) => ({ file: f, role }));
+        media.push(...bigEntries);
         renderUI();
-        onChange?.();
+        onChange?.(bigEntries.some(isProbeCandidate) ? { longDelay: true } : undefined);
+        bigEntries.forEach(probeIfVideo);
       }
     }
   }
@@ -148,6 +182,7 @@ export function renderMediaPicker({ accept = MEDIA_ACCEPT, onChange, preview = f
       );
 
       list.appendChild(row);
+      if (entry.hevc) list.appendChild(buildCodecWarning(entry));
     });
   }
 
@@ -252,9 +287,42 @@ export function renderMediaPicker({ accept = MEDIA_ACCEPT, onChange, preview = f
     toggle.appendChild(mkBtn("output", "Out"));
     foot.appendChild(toggle);
     meta.appendChild(foot);
+    if (entry.hevc) meta.appendChild(buildCodecWarning(entry));
     tile.appendChild(meta);
 
     return tile;
+  }
+
+  // Small non-blocking notice for a video the client-side probe flagged as
+  // H.265/HEVC. Doesn't stop the add — just offers to also save a browser-safe
+  // copy once the file actually lands in the vault (conversion needs the file
+  // on disk, so it can't happen until then).
+  function buildCodecWarning(entry) {
+    const warn = el("div", { className: "wv-mp-codec-warn" }, [
+      el("i", {
+        className: "pi pi-exclamation-triangle",
+        title: "H.265/HEVC: Firefox on Windows plays this only via a hardware decoder, with no software fallback.",
+      }),
+      el("span", {}, ["H.265"]),
+    ]);
+    warn.appendChild(
+      el(
+        "button",
+        {
+          type: "button",
+          className: `wv-mp-convert-toggle${entry.convertToH264 ? " wv-mp-convert-toggle-active" : ""}`,
+          "aria-pressed": entry.convertToH264 ? "true" : "false",
+          title: "Also save a browser-safe H.264 copy alongside the original once this is added",
+          onclick: () => {
+            entry.convertToH264 = !entry.convertToH264;
+            renderUI();
+            onChange?.();
+          },
+        },
+        [el("i", { className: "pi pi-check" }), "Convert to H.264"]
+      )
+    );
+    return warn;
   }
 
   function buildAddTile(role) {
@@ -378,5 +446,45 @@ export function renderMediaPicker({ accept = MEDIA_ACCEPT, onChange, preview = f
     element: wrap,
     isEmpty: () => media.length === 0,
     getByRole: (role) => media.filter((m) => m.role === role).map((m) => m.file),
+    // Parallel to getByRole(role) — same filter/order — so callers can zip
+    // files[i] with flags[i] to know which uploaded files should be converted
+    // to H.264 once they're actually saved.
+    getConvertFlags: (role) => media.filter((m) => m.role === role).map((m) => !!m.convertToH264),
+    // Belt-and-suspenders alongside the { longDelay } onChange signal: a
+    // caller committing on a timer should await this immediately before
+    // building the upload, so a slow probe can never lose a race against the
+    // debounce and upload a file whose codec (and convert choice) was never
+    // actually resolved.
+    awaitPendingProbes: () => Promise.all(media.map((m) => m.probeDone).filter(Boolean)),
   };
+}
+
+// After a save that included files flagged via the picker's "Convert to
+// H.264" toggle, call the same /convert-media endpoint the reactive
+// playback-failure button uses. `files`/`flags` come from a matching
+// getByRole(role)/getConvertFlags(role) pair; `mediaItems` is the set of
+// newly-created media entries (with .file and .original_filename) to search
+// for a match — callers are responsible for scoping that set to only the
+// items that were actually just created, so a same-named pre-existing file
+// elsewhere in the entry is never mistaken for the one just flagged.
+export async function convertFlaggedMedia(entryId, mediaItems, files, flags) {
+  const used = new Set();
+  const targets = [];
+  files.forEach((file, i) => {
+    if (!flags[i]) return;
+    const match = mediaItems.find((m) => !used.has(m) && m.original_filename === file.name);
+    if (match) {
+      used.add(match);
+      targets.push(match);
+    }
+  });
+  for (const item of targets) {
+    try {
+      const result = await VaultAPI.convertMedia(entryId, item.file);
+      showToast(`Converted ${result.codec} to H.264 (${formatSize(result.bytes_before)} → ${formatSize(result.bytes_after)}). The original was kept.`, "success");
+    } catch (e) {
+      showToast(`Couldn't convert "${item.original_filename}": ${e.message}`, "error");
+    }
+  }
+  return targets.length > 0;
 }

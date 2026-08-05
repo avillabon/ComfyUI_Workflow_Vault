@@ -667,27 +667,13 @@ async def post_open_entry_folder(request):
 async def post_browse_folder(request):
     """Open a native OS folder-picker dialog and return the chosen path.
 
-    Runs tkinter off the event loop so the server stays responsive while the
-    dialog is open. Returns {"path": "..."} or an error if the user cancels or
-    tkinter is unavailable."""
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-    except ImportError:
-        return _error("Native folder browser is unavailable (tkinter not installed).")
-
-    def _pick():
-        root = tk.Tk()
-        root.withdraw()
-        root.wm_attributes("-topmost", True)
-        path = filedialog.askdirectory(title="Choose vault folder")
-        root.destroy()
-        return path or None
-
-    chosen = await asyncio.to_thread(_pick)
-    if not chosen:
-        return web.json_response({"ok": True, "path": None})
-    return web.json_response({"ok": True, "path": chosen})
+    Runs off the event loop so the server stays responsive while the dialog
+    is open. Returns {"path": "..."} (None if the user cancelled) or an error
+    if no native picker is available on this platform/install."""
+    path, err = await asyncio.to_thread(utils.pick_folder_dialog, "Choose vault folder")
+    if err:
+        return _error(err)
+    return web.json_response({"ok": True, "path": path})
 
 
 @_post("/workflow-vault/compress-examples")

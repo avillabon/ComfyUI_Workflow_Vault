@@ -48,6 +48,81 @@ def reveal_in_file_manager(path):
         return False, f"Could not reveal file: {e}"
 
 
+def pick_folder_dialog(title="Choose a folder"):
+    """Open a native OS folder-picker dialog. Returns (path, error) — path is
+    None with no error if the user cancelled.
+
+    Tries tkinter first (present on most desktop Python installs, all
+    platforms). ComfyUI's official Windows *portable* build ships an
+    embeddable Python with no tkinter, so on Windows we fall back to the
+    shell's folder-browse dialog directly via ctypes — stdlib-only, no
+    pywin32 or other dependency, so it works on that same embeddable build."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError:
+        if sys.platform.startswith("win"):
+            try:
+                return _pick_folder_win32(title), None
+            except Exception as e:
+                return None, f"Native folder browser failed: {e}"
+        return None, "Native folder browser is unavailable (tkinter not installed)."
+
+    root = tk.Tk()
+    root.withdraw()
+    root.wm_attributes("-topmost", True)
+    path = filedialog.askdirectory(title=title)
+    root.destroy()
+    return (path or None), None
+
+
+def _pick_folder_win32(title):
+    """The classic SHBrowseForFolder shell dialog via ctypes. restype/argtypes
+    are set explicitly on every call — without them ctypes assumes a 32-bit
+    `int` return, which silently truncates the 64-bit PIDL pointer on modern
+    Windows and corrupts the result."""
+    import ctypes
+
+    BIF_RETURNONLYFSDIRS = 0x00000001
+    BIF_NEWDIALOGSTYLE = 0x00000040
+
+    class BROWSEINFOW(ctypes.Structure):
+        _fields_ = [
+            ("hwndOwner", ctypes.c_void_p),
+            ("pidlRoot", ctypes.c_void_p),
+            ("pszDisplayName", ctypes.c_wchar_p),
+            ("lpszTitle", ctypes.c_wchar_p),
+            ("ulFlags", ctypes.c_uint),
+            ("lpfn", ctypes.c_void_p),
+            ("lParam", ctypes.c_void_p),
+            ("iImage", ctypes.c_int),
+        ]
+
+    shell32 = ctypes.windll.shell32
+    ole32 = ctypes.windll.ole32
+    shell32.SHBrowseForFolderW.restype = ctypes.c_void_p
+    shell32.SHBrowseForFolderW.argtypes = [ctypes.POINTER(BROWSEINFOW)]
+    shell32.SHGetPathFromIDListW.restype = ctypes.c_int
+    shell32.SHGetPathFromIDListW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+    ole32.CoTaskMemFree.restype = None
+    ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+
+    display_name = ctypes.create_unicode_buffer(260)
+    bi = BROWSEINFOW()
+    bi.pszDisplayName = ctypes.cast(display_name, ctypes.c_wchar_p)
+    bi.lpszTitle = title
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE
+
+    pidl = shell32.SHBrowseForFolderW(ctypes.byref(bi))
+    if not pidl:
+        return None  # user cancelled
+
+    path_buf = ctypes.create_unicode_buffer(260)
+    shell32.SHGetPathFromIDListW(pidl, path_buf)
+    ole32.CoTaskMemFree(pidl)
+    return path_buf.value or None
+
+
 def set_file_times(path, mtime, ctime=None):
     """Stamp a file's modified/access time (and, on Windows, its creation time)
     so a converted file keeps its source file's date. Best-effort: never raises.

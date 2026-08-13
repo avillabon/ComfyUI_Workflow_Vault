@@ -1,3 +1,5 @@
+
+
 # ComfyUI Workflow Vault
 
 A local, single-user workflow library built into ComfyUI. Save workflows as
@@ -21,7 +23,7 @@ folder you choose on disk. No database, no account, no cloud sync.
 ### Manual
 
 1. Copy (or clone) this folder into your ComfyUI `custom_nodes` directory, so
-   you end up with `ComfyUI/custom_nodes/Comfy_Workflow_Vault/`.
+   you end up with `ComfyUI/custom_nodes/ComfyUI_Workflow_Vault/`.
 2. Restart ComfyUI.
 
 ### Dependencies

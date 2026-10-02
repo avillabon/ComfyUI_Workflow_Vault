@@ -28,6 +28,51 @@ def open_in_file_manager(path):
         return False, f"Could not open folder: {e}"
 
 
+def _select_in_explorer(path):
+    """Open an Explorer window with `path` selected, via the shell API
+    (SHOpenFolderAndSelectItems). This is the supported way to do it and, unlike
+    running `explorer /select,<path>`, it never builds a command line, so quoting,
+    spaces, accented letters and symbols in the path can't change what runs or
+    break the call. Returns True on success.
+
+    Explorer's command-line form was tried as a list argument too, but it only
+    works for paths without spaces or non-ASCII characters (it falls back to
+    opening Documents), so the shell API is used instead."""
+    import ctypes
+
+    try:
+        shell32 = ctypes.windll.shell32
+        ole32 = ctypes.windll.ole32
+        shell32.ILCreateFromPathW.restype = ctypes.c_void_p
+        shell32.ILCreateFromPathW.argtypes = [ctypes.c_wchar_p]
+        shell32.ILFree.restype = None
+        shell32.ILFree.argtypes = [ctypes.c_void_p]
+        shell32.SHOpenFolderAndSelectItems.restype = ctypes.c_long  # HRESULT
+        shell32.SHOpenFolderAndSelectItems.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_ulong]
+        ole32.CoInitialize.restype = ctypes.c_long
+        ole32.CoInitialize.argtypes = [ctypes.c_void_p]
+        ole32.CoUninitialize.restype = None
+        ole32.CoUninitialize.argtypes = []
+    except Exception:
+        return False
+
+    # S_OK / S_FALSE both need a matching CoUninitialize; a negative result (the
+    # thread already has a different COM mode) means we must not call it.
+    hr_init = ole32.CoInitialize(None)
+    try:
+        pidl = shell32.ILCreateFromPathW(path)
+        if not pidl:
+            return False
+        try:
+            # cidl=0 with a full item path selects that item in its parent folder.
+            return shell32.SHOpenFolderAndSelectItems(pidl, 0, None, 0) >= 0
+        finally:
+            shell32.ILFree(pidl)
+    finally:
+        if hr_init >= 0:
+            ole32.CoUninitialize()
+
+
 def reveal_in_file_manager(path):
     """Open the OS file manager with a specific file selected/highlighted.
     Returns (ok, error)."""
@@ -35,8 +80,12 @@ def reveal_in_file_manager(path):
         return False, "File not found."
     try:
         if sys.platform.startswith("win"):
-            # explorer needs the unusual `/select,<path>` form as one argument.
-            subprocess.Popen(f'explorer /select,"{os.path.normpath(path)}"')
+            path = os.path.normpath(path)
+            if not _select_in_explorer(path):
+                # The shell call failed (or ctypes is unavailable): open the folder
+                # holding the file instead. os.startfile takes the path directly, so
+                # nothing here is ever parsed as a command line.
+                os.startfile(os.path.dirname(path))  # noqa: B606 - local single-user tool
         elif sys.platform == "darwin":
             subprocess.Popen(["open", "-R", path])
         else:

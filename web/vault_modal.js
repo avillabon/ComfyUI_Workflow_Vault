@@ -10,7 +10,7 @@ import { renderProfileSwitcher } from "./vault_profiles.js";
 import { showShortcutsDialog } from "./vault_shortcuts.js";
 
 // App version (SemVer). Keep in sync with pyproject.toml; shown in the footer.
-export const VAULT_VERSION = "1.9.0";
+export const VAULT_VERSION = "1.9.1";
 export const AUTHOR_NAME = "Alex Villabón";
 export const AUTHOR_URL = "https://www.youtube.com/@alexvillabon";
 export const REPO_URL = "https://github.com/avillabon/ComfyUI_Workflow_Vault";

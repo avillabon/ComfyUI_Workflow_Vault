@@ -21,7 +21,13 @@ DEFAULT_VAULT_SETTINGS = {
     "schema_version": "1.0",
     "show_archived": False,
     "default_thumbnail_behavior": "placeholder",
-    "grid_columns": 3,
+    "grid_columns": 3,  # legacy: superseded by card_size, kept so old vaults still load
+    # Grid card width. The number of columns follows from the window width, so
+    # cards stay the same size on bigger screens instead of stretching.
+    "card_size": "medium",  # "small" | "medium" | "large" | "xlarge"
+    # How wide the vault window may grow. "auto" steps up with the screen size;
+    # the others pin a maximum width (see the --wv-modal-max rules in the CSS).
+    "window_size": "auto",  # "auto" | "compact" | "comfortable" | "wide" | "ultrawide"
     "sort": "updated",
     # Accent color applied to icons and the brand logo (CSS --wv-accent).
     "accent_color": "#4d9fff",
@@ -42,6 +48,10 @@ DEFAULT_VAULT_SETTINGS = {
 }
 
 VALID_SORTS = ("updated", "created", "name")
+VALID_CARD_SIZES = ("small", "medium", "large", "xlarge")
+VALID_WINDOW_SIZES = ("auto", "compact", "comfortable", "wide", "ultrawide")
+# Old "N per row" choices map to the card size that looked closest.
+_GRID_COLUMNS_TO_CARD_SIZE = {2: "large", 3: "medium", 4: "small"}
 CARD_FIELD_KEYS = ("description", "tags", "versions", "examples", "date")
 VALID_COMPRESS_FORMATS = ("webp", "jpeg")
 
@@ -305,6 +315,12 @@ def load_vault_settings(vault_root):
     settings = utils.read_json(os.path.join(vault_root, "vault_settings.json"), default={})
     merged = dict(DEFAULT_VAULT_SETTINGS)
     merged.update(settings or {})
+    if "card_size" not in (settings or {}):
+        merged["card_size"] = _GRID_COLUMNS_TO_CARD_SIZE.get(merged.get("grid_columns"), "medium")
+    elif merged["card_size"] not in VALID_CARD_SIZES:
+        merged["card_size"] = "medium"
+    if merged["window_size"] not in VALID_WINDOW_SIZES:
+        merged["window_size"] = "auto"
     # Deep-merge card_fields so a partial stored value still carries defaults
     # for any keys added in later versions.
     card_fields = dict(DEFAULT_VAULT_SETTINGS["card_fields"])

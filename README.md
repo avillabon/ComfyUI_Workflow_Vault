@@ -61,7 +61,19 @@ example media already filled in. You can switch to your own folder later from
 
 - **Grid view** with search, status filter, Favorites and Show-archived
   toggles, sort controls (by name, created date, or last updated), and a
-  **per-row density selector** (2, 3, or 4 columns) on the breadcrumb line.
+  **card size selector** (Small, Medium, Large, or Extra large) on the breadcrumb line.
+  Cards are exactly that width on every screen and the number per row follows
+  the window width, so a bigger screen shows more cards instead of bigger ones
+  (spare width becomes even margins at the sides).
+- **Adapts to your screen** — the vault window grows in steps as the screen
+  gets larger (about 1400 → 1640 → 2000 → 2400 px wide) and never past 92% of
+  the viewport. Pick a fixed maximum instead under **Settings → General →
+  Window size** (Auto, Compact, Comfortable, Wide, Ultra-wide). Each option is a
+  tile showing a miniature of the window, its maximum width, and what it gives on
+  your screen (real width and about how many cards per row). It applies
+  instantly and is saved with the vault, so it follows the vault to any browser.
+  In a narrow window the sidebar filters collapse into a drawer opened from the
+  filter button in the top bar.
 - **Sidebar filters** with live counts:
   - **Generation Type** (Image, Video, Audio, 3D Model, LLM, API Nodes). An
     entry can carry more than one type and shows up under each.
@@ -195,6 +207,8 @@ Vault Settings (⚙) is organized into four tabs:
     behavior when an entry has no thumbnail.
   - **Card display** — toggle individual grid-card fields (Description, Tags,
     Version count, Example count, Date) on or off for a minimal look.
+  - **Window size** — Auto, Compact, Comfortable, Wide, or Ultra-wide (see
+    "Adapts to your screen" above).
 - **Organization**
   - **Tags** — rename, merge (rename to an existing tag), or delete tags across
     all entries.

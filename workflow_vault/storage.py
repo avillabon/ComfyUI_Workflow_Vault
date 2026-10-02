@@ -1,10 +1,19 @@
 """Filesystem layout helpers and vault scanning.
 
-No central index or database: every read walks the entries/ directory and
-reads the relevant JSON/Markdown files directly.
+The files on disk are the only source of truth. Two in-memory accelerators sit
+on top of them, and both re-check what they hold against the disk, so editing
+or moving folders by hand stays safe:
+
+- an id -> slug map per vault root, confirmed with one manifest read per lookup
+  and rebuilt with one scan on a miss (find_slug_by_id);
+- a per-entry state cache keyed by a stat fingerprint of the entry's files
+  (build_entry_state).
 """
 
 import os
+import stat
+import threading
+import time
 
 from . import utils
 
@@ -45,18 +54,26 @@ def example_dir(vault_root, slug, example_dir_name):
     return os.path.join(examples_dir(vault_root, slug), example_dir_name)
 
 
+def _entry_folder_names(vault_root):
+    """Sorted names of the non-staging folders under entries/, with or without
+    a manifest. scandir reports is_dir for free, unlike a stat per name."""
+    edir = entries_dir(vault_root)
+    try:
+        with os.scandir(edir) as it:
+            return sorted(
+                e.name for e in it
+                if not e.name.startswith(staging_entry_prefix()) and e.is_dir()
+            )
+    except OSError:
+        return []
+
+
 def list_entry_slugs(vault_root):
     edir = entries_dir(vault_root)
-    if not os.path.isdir(edir):
-        return []
-    slugs = []
-    for name in sorted(os.listdir(edir)):
-        if name.startswith(staging_entry_prefix()):
-            continue
-        full = os.path.join(edir, name)
-        if os.path.isdir(full) and os.path.isfile(os.path.join(full, "manifest.json")):
-            slugs.append(name)
-    return slugs
+    return [
+        name for name in _entry_folder_names(vault_root)
+        if os.path.isfile(os.path.join(edir, name, "manifest.json"))
+    ]
 
 
 def read_manifest(vault_root, slug):
@@ -90,12 +107,64 @@ def write_notes(vault_root, slug, notes):
     utils.atomic_write_json(notes_path(vault_root, slug), {"notes": notes or []})
 
 
-def find_slug_by_id(vault_root, entry_id):
+# --- id -> slug index -------------------------------------------------------
+# Every /entries/{id}/... route and every thumbnail request resolves an id to
+# its folder, so scanning all manifests per lookup made a grid of N cards cost
+# O(N^2). The map is only a hint: a hit is confirmed against the manifest on
+# disk and a miss or mismatch rescans, so it can never return a wrong slug.
+# Keyed by realpath because vaults (profiles) are switched at runtime.
+
+_INDEX_LOCK = threading.Lock()
+_SLUG_INDEXES = {}  # realpath(vault_root) -> {entry_id: slug}
+
+
+def _root_key(vault_root):
+    return os.path.realpath(vault_root)
+
+
+def _valid_entry_id(entry_id):
+    return isinstance(entry_id, str) and bool(entry_id)
+
+
+def _remember_slug(key, entry_id, slug):
+    """Record a just-observed id -> slug pairing so a freshly created, renamed
+    or duplicated entry is found without a rescan."""
+    if _valid_entry_id(entry_id) and not slug.startswith(staging_entry_prefix()):
+        with _INDEX_LOCK:
+            _SLUG_INDEXES.setdefault(key, {})[entry_id] = slug
+
+
+def _rebuild_slug_index(vault_root, key):
+    index = {}
     for slug in list_entry_slugs(vault_root):
+        manifest = read_manifest(vault_root, slug)
+        entry_id = manifest.get("id") if manifest else None
+        if _valid_entry_id(entry_id):
+            index.setdefault(entry_id, slug)  # duplicate ids: first slug wins, as a scan would
+    with _INDEX_LOCK:
+        _SLUG_INDEXES[key] = index
+
+
+def _confirm_indexed(vault_root, key, entry_id):
+    with _INDEX_LOCK:
+        slug = _SLUG_INDEXES.get(key, {}).get(entry_id)
+    if slug:
         manifest = read_manifest(vault_root, slug)
         if manifest and manifest.get("id") == entry_id:
             return slug, manifest
     return None, None
+
+
+def find_slug_by_id(vault_root, entry_id):
+    """Return (slug, manifest) for an entry id, or (None, None)."""
+    if not _valid_entry_id(entry_id):
+        return None, None
+    key = _root_key(vault_root)
+    slug, manifest = _confirm_indexed(vault_root, key, entry_id)
+    if slug:
+        return slug, manifest
+    _rebuild_slug_index(vault_root, key)
+    return _confirm_indexed(vault_root, key, entry_id)
 
 
 def list_versions(vault_root, slug):
@@ -173,7 +242,72 @@ def _coerce_generation_types(manifest):
     return [legacy] if isinstance(legacy, str) and legacy else []
 
 
-def build_entry_state(vault_root, slug):
+# --- per-entry state cache --------------------------------------------------
+# The UI re-fetches /state after almost every mutation, and building it re-read
+# and re-parsed every entry's manifest, versions, examples and notes. A state is
+# reused while a fingerprint of exactly the files it was built from is unchanged:
+# manifest.json, notes.json and notes.md (the legacy fallback), plus every
+# versions/*/version.json and examples/*/example.json. Nothing deeper feeds the
+# state (example media files are never read here), and listing those folders
+# each time means added or removed versions and examples change the fingerprint
+# without relying on directory mtimes.
+#
+# Timestamps are not trusted for files written moments ago: two writes inside
+# one filesystem clock tick can share an mtime, and an in-place edit can keep
+# the size. So an entry touched within _RACY_NS (or stamped in the future) is
+# rebuilt instead of cached; a stale hit would need a write landing after the
+# entry had already been quiet for that long, which always moves the mtime.
+
+_STATE_LOCK = threading.Lock()
+_STATE_CACHE = {}  # (realpath(vault_root), slug) -> (fingerprint, state)
+_RACY_NS = 2_000_000_000
+
+
+def _clone(value):
+    """Copy a JSON-shaped value (dicts, lists, scalars) much faster than
+    copy.deepcopy, so cached states can be handed out without being shared."""
+    if isinstance(value, dict):
+        return {k: _clone(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_clone(v) for v in value]
+    return value
+
+
+def _entry_fingerprint(vault_root, slug):
+    """Return (fingerprint, cacheable); (None, False) if the entry has no
+    manifest. Taken BEFORE the files are read, so a write landing in between
+    only costs a harmless rebuild next time."""
+    now = time.time_ns()
+    edir = entry_dir(vault_root, slug)
+    sigs = []
+
+    def add(rel):
+        try:
+            st = os.stat(os.path.join(edir, rel))
+        except OSError:
+            return False
+        if not stat.S_ISREG(st.st_mode):
+            return False
+        sigs.append((rel, st.st_mtime_ns, st.st_size, st.st_ino))
+        return True
+
+    if not add("manifest.json"):
+        return None, False
+    add("notes.json")
+    add("notes.md")
+    for sub, filename in (("versions", "version.json"), ("examples", "example.json")):
+        try:
+            names = sorted(os.listdir(os.path.join(edir, sub)))
+        except OSError:
+            continue
+        for name in names:
+            add(f"{sub}/{name}/{filename}")
+
+    newest = max(sig[1] for sig in sigs)
+    return tuple(sigs), now - newest > _RACY_NS
+
+
+def _read_entry_state(vault_root, slug):
     manifest = read_manifest(vault_root, slug)
     if not manifest:
         return None
@@ -198,6 +332,31 @@ def build_entry_state(vault_root, slug):
         "examples": list_examples(vault_root, slug),
         "notes": read_notes(vault_root, slug),
     }
+
+
+def _build_entry_state(vault_root, slug, key):
+    cache_key = (key, slug)
+    fingerprint, cacheable = _entry_fingerprint(vault_root, slug)
+    if fingerprint is not None:
+        with _STATE_LOCK:
+            hit = _STATE_CACHE.get(cache_key)
+        if hit and hit[0] == fingerprint:
+            _remember_slug(key, hit[1]["id"], slug)
+            return _clone(hit[1])  # callers add keys like "warnings" to what they get
+
+    state = _read_entry_state(vault_root, slug)
+    with _STATE_LOCK:
+        if state is not None and cacheable:
+            _STATE_CACHE[cache_key] = (fingerprint, _clone(state))
+        else:
+            _STATE_CACHE.pop(cache_key, None)
+    if state is not None:
+        _remember_slug(key, state["id"], slug)
+    return state
+
+
+def build_entry_state(vault_root, slug):
+    return _build_entry_state(vault_root, slug, _root_key(vault_root))
 
 
 def compute_footprint(vault_root):
@@ -253,15 +412,28 @@ def compute_footprint(vault_root):
 
 
 def build_state(vault_root):
+    key = _root_key(vault_root)
+    # Manifest-less folders are skipped by _build_entry_state, so the extra
+    # isfile per entry that list_entry_slugs does would be a wasted stat.
+    slugs = _entry_folder_names(vault_root)
     entries = []
-    for slug in list_entry_slugs(vault_root):
-        entry = build_entry_state(vault_root, slug)
+    tags = set()
+    for slug in slugs:
+        entry = _build_entry_state(vault_root, slug, key)
         if entry:
             entries.append(entry)
+            tags.update(entry["tags"])  # the set all_tags() would re-read every manifest for
+
+    # Forget cached states of entries that were deleted or renamed away.
+    live = set(slugs)
+    with _STATE_LOCK:
+        for stale in [k for k in _STATE_CACHE if k[0] == key and k[1] not in live]:
+            del _STATE_CACHE[stale]
+
     return {
         "folders": read_folders(vault_root),
         "entries": entries,
-        "tags": all_tags(vault_root),
+        "tags": sorted(tags),
     }
 
 

@@ -9,7 +9,7 @@ import { tagCountsFrom } from "./vault_tag_input.js";
 import { renderProfileSwitcher } from "./vault_profiles.js";
 
 // App version (SemVer). Keep in sync with pyproject.toml; shown in the footer.
-export const VAULT_VERSION = "1.7.0";
+export const VAULT_VERSION = "1.8.0";
 export const AUTHOR_NAME = "Alex Villabón";
 export const AUTHOR_URL = "https://www.youtube.com/@alexvillabon";
 export const REPO_URL = "https://github.com/avillabon/ComfyUI_Workflow_Vault";
@@ -296,7 +296,19 @@ export function renderTopbar(controller) {
     controller.render();
   });
 
-  const row1 = el("div", { className: "wv-topbar-row" }, [search, spacer(), newEntryBtn, settingsBtn, closeBtn]);
+  // Only visible when the sidebar is a drawer (narrow window).
+  const sidebarToggle = el(
+    "button",
+    {
+      className: "wv-icon-btn wv-icon-btn-lg wv-sidebar-toggle",
+      title: "Filters",
+      "aria-label": "Show filters",
+      "aria-expanded": String(!!controller.ui.sidebarOpen),
+      onclick: () => controller.setSidebarOpen(!controller.ui.sidebarOpen),
+    },
+    [el("i", { className: "pi pi-filter" })]
+  );
+  const row1 = el("div", { className: "wv-topbar-row" }, [sidebarToggle, search, spacer(), newEntryBtn, settingsBtn, closeBtn]);
   const row2 = el("div", { className: "wv-topbar-row" }, [sortSelect, statusSelect, favoritesToggle, archivedToggle]);
   controls.appendChild(row1);
   controls.appendChild(row2);
@@ -319,6 +331,14 @@ export function renderGridBody(controller) {
   renderTagFilter(sidebar, controller);
   sidebar.appendChild(renderSidebarFooter());
   body.appendChild(sidebar);
+  // Only used when the window is narrow enough that the sidebar is a drawer.
+  body.appendChild(
+    el("div", {
+      className: "wv-sidebar-scrim",
+      onclick: () => controller.setSidebarOpen(false),
+    })
+  );
+  if (controller.ui.sidebarOpen) body.classList.add("wv-body-sidebar-open");
 
   const main = el("div", { className: "wv-main" });
   main.appendChild(renderBreadcrumb(controller));
@@ -327,8 +347,7 @@ export function renderGridBody(controller) {
   if (entries.length === 0) {
     main.appendChild(renderEmptyState(controller));
   } else {
-    const gridColumns = controller.state.settings?.grid_columns || 3;
-    const grid = el("div", { className: `wv-grid wv-grid-cols-${gridColumns}` });
+    const grid = el("div", { className: `wv-grid wv-grid-size-${cardSize(controller)}` });
     for (const entry of entries) {
       grid.appendChild(renderCard(entry, controller));
     }
@@ -526,33 +545,46 @@ function renderBreadcrumb(controller) {
     );
   });
 
-  // Per-row (grid density) control lives on the breadcrumb line, pushed to the
-  // right edge by a flexible spacer.
-  const gridColumns = controller.state.settings?.grid_columns || 3;
+  // Card size control lives on the breadcrumb line, pushed to the right edge by
+  // a flexible spacer. Cards keep this width; how many fit per row follows from
+  // the window width.
+  const currentCardSize = cardSize(controller);
   const densitySelect = el(
     "select",
     {
       className: "wv-input wv-grid-density",
-      title: "Workflows per row",
-      "aria-label": "Workflows per row",
+      title: "Card size",
+      "aria-label": "Card size",
       onchange: async (e) => {
-        const value = Number(e.target.value);
+        const value = e.target.value;
         controller.state.settings = controller.state.settings || {};
-        controller.state.settings.grid_columns = value;
+        controller.state.settings.card_size = value;
         controller.render();
         try {
-          await VaultAPI.postSettings({ grid_columns: value });
+          await VaultAPI.postSettings({ card_size: value });
         } catch (err) {
           showToast(err.message, "error");
         }
       },
     },
-    [2, 3, 4].map((n) => el("option", { value: n, selected: n === gridColumns }, [`${n} per row`]))
+    CARD_SIZES.map(([value, label]) => el("option", { value, selected: value === currentCardSize }, [label]))
   );
   row.appendChild(el("div", { className: "wv-topbar-spacer" }));
   row.appendChild(densitySelect);
 
   return row;
+}
+
+const CARD_SIZES = [
+  ["small", "Small"],
+  ["medium", "Medium"],
+  ["large", "Large"],
+  ["xlarge", "Extra large"],
+];
+
+function cardSize(controller) {
+  const size = controller.state.settings?.card_size;
+  return CARD_SIZES.some(([value]) => value === size) ? size : "medium";
 }
 
 function filterEntries(controller) {
@@ -659,10 +691,9 @@ function renderCard(entry, controller) {
         className: "wv-card-open",
         title: "Open workflow",
         "aria-label": `Open ${entry.name} workflow`,
-        onclick: async (e) => {
+        onclick: (e) => {
           e.stopPropagation();
-          const ok = await openCurrentVersion(controller, entry);
-          if (ok) controller.close();
+          openCurrentVersion(controller, entry);
         },
       },
       [el("i", { className: "pi pi-play" })]

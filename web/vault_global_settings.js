@@ -4,6 +4,7 @@
 import { el, showToast, confirmDialog, promptDialog, applyAccentColor, formatBytes } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
 import { renderProfilesSection, activeProfile } from "./vault_profiles.js";
+import { WINDOW_SIZES, effectiveWidth, cardsPerRow, autoMaxWidth } from "./vault_window_size.js";
 
 // Optional grid-card fields the user can hide for a more minimal look.
 const CARD_FIELD_DEFS = [
@@ -284,6 +285,9 @@ export function renderGlobalSettings(controller) {
     cardPanel.appendChild(settingRow(label, sw));
   }
   sections.general.appendChild(cardPanel);
+
+  // --- Window size (saved with the vault; applies instantly, not part of Save) ---
+  sections.general.appendChild(renderWindowSizePanel(controller));
 
   // --- Appearance (accent color) ---
   let selectedAccent = state.settings?.accent_color || DEFAULT_ACCENT;
@@ -619,6 +623,102 @@ export function renderGlobalSettings(controller) {
 
   wrap.appendChild(body);
   return wrap;
+}
+
+// Window size picker: one tile per option. Each shows a miniature of the window
+// (drawn against a fixed large reference screen so the options always look
+// different from each other), its nominal maximum, and what it actually gives on
+// THIS screen: the real width and about how many cards fit per row at the
+// current card size. Picking a tile resizes the open window straight away.
+const WINDOW_SIZE_REFERENCE_SCREEN = 2560;
+
+function renderWindowSizePanel(controller) {
+  const panelEl = panel(
+    "Window size",
+    "pi pi-window-maximize",
+    "How wide the vault window can grow. Wider windows fit more cards per row; the cards themselves keep their size (change that with the card size menu above the grid). Saved with this vault, so it applies in any browser."
+  );
+
+  const viewport = window.innerWidth;
+  const limit = Math.round(viewport * 0.92);
+  const cardSize = controller.state.settings?.card_size || "medium";
+  const autoPx = autoMaxWidth() ?? 1400;
+
+  const tiles = new Map();
+  let anyTrimmed = false;
+  const grid = el("div", { className: "wv-ws-tiles", role: "radiogroup", "aria-label": "Window size" });
+  for (const [id, label, maxPx, blurb] of WINDOW_SIZES) {
+    const nominal = maxPx ?? autoPx;
+    const px = effectiveWidth(nominal, viewport);
+    const trimmed = maxPx != null && px < maxPx;
+    anyTrimmed = anyTrimmed || trimmed;
+    const perRow = cardsPerRow(px, cardSize);
+
+    const miniature =
+      id === "auto"
+        ? // Adaptive: a small window inside a larger faded one.
+          [
+            el("span", { className: "wv-ws-window wv-ws-window-faded", style: { width: "92%" } }),
+            el("span", { className: "wv-ws-window", style: { width: "58%" } }),
+          ]
+        : [el("span", { className: "wv-ws-window", style: { width: `${Math.round((maxPx / WINDOW_SIZE_REFERENCE_SCREEN) * 100)}%` } })];
+
+    const tile = el(
+      "button",
+      {
+        type: "button",
+        className: `wv-ws-tile${trimmed ? " wv-ws-tile-trimmed" : ""}`,
+        role: "radio",
+        title:
+          maxPx == null
+            ? `${blurb}.`
+            : `${blurb}. On this screen: ${px} px wide, about ${perRow} card${perRow === 1 ? "" : "s"} per row${trimmed ? ` (trimmed from ${maxPx} px)` : ""}.`,
+        onclick: async () => {
+          await controller.setWindowSize(id);
+          sync();
+        },
+      },
+      [
+        el("span", { className: "wv-ws-screen", "aria-hidden": "true" }, miniature),
+        el("span", { className: "wv-ws-name" }, [label]),
+        el("span", { className: "wv-ws-meta" }, [maxPx == null ? "by screen size" : `up to ${maxPx} px`]),
+        // Auto is self-explanatory; the fixed sizes show what they give on this screen.
+        ...(maxPx == null
+          ? []
+          : [
+              el("span", { className: "wv-ws-meta wv-ws-here" }, [`here: ${px} px`]),
+              el("span", { className: "wv-ws-meta wv-ws-here" }, [`~${perRow} per row`]),
+            ]),
+      ]
+    );
+    tiles.set(id, tile);
+    grid.appendChild(tile);
+  }
+  panelEl.appendChild(grid);
+
+  const legend = el("div", { className: "wv-radio-desc wv-vs-hint" });
+  panelEl.appendChild(legend);
+
+  function sync() {
+    const current = controller.windowSize;
+    for (const [id, tile] of tiles) {
+      const on = id === current;
+      tile.classList.toggle("wv-ws-tile-active", on);
+      tile.setAttribute("aria-checked", String(on));
+    }
+    const lines = [
+      "Miniatures compare each size on a large screen. “here” is what you get on this screen.",
+      current === "auto"
+        ? "Auto steps up as your screen gets larger, so one vault looks right on a laptop and on a big monitor."
+        : "A fixed choice for this vault, on every screen.",
+    ];
+    if (anyTrimmed) {
+      lines.push(`Your screen is ${viewport} px wide, and the window never goes past 92% of it (${limit} px), so dimmed sizes are trimmed here.`);
+    }
+    legend.replaceChildren(...lines.map((text) => el("div", {}, [text])));
+  }
+  sync();
+  return panelEl;
 }
 
 function renderHealthPanel(controller) {

@@ -339,6 +339,14 @@ def _apply_settings(body):
         if grid_columns not in (2, 3, 4):
             return _error("Invalid grid_columns.")
         updates["grid_columns"] = grid_columns
+    if "card_size" in body:
+        if body["card_size"] not in config.VALID_CARD_SIZES:
+            return _error("Invalid card_size.")
+        updates["card_size"] = body["card_size"]
+    if "window_size" in body:
+        if body["window_size"] not in config.VALID_WINDOW_SIZES:
+            return _error("Invalid window_size.")
+        updates["window_size"] = body["window_size"]
     if "sort" in body:
         if body["sort"] not in config.VALID_SORTS:
             return _error("Invalid sort.")

@@ -84,11 +84,18 @@ export async function openCurrentVersion(controller, entry) {
   return openVersionById(controller, entry, entry.current_version_id);
 }
 
+// Opens a version on the canvas and, on success, closes the vault so the
+// workflow is what's in front of the user. Every "open" button goes through
+// here so they all behave the same. The vault remembers where it was and comes
+// back to the same entry next time it's opened.
 export async function openVersionById(controller, entry, versionId) {
+  // Unsaved edits in the entry form would be lost when the vault closes.
+  if (!(await controller.checkDirty())) return false;
   try {
     const workflow = await VaultAPI.getVersionWorkflow(entry.id, versionId);
     await openWorkflowInGraph(workflow, entry.name, { entry_id: entry.id, version_id: versionId });
     showToast(`Opened "${entry.name}".`, "success");
+    controller.close({ keepPlace: true });
     return true;
   } catch (e) {
     showToast(e.message, "error");

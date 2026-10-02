@@ -8,6 +8,7 @@ import { renderLoading, renderInitView, renderTopbar, renderGridBody } from "./v
 import { renderDetailView } from "./vault_detail.js";
 import { renderWizard } from "./vault_wizard.js";
 import { renderGlobalSettings } from "./vault_global_settings.js";
+import { readWindowSizeHint, saveWindowSizeHint, isWindowSize } from "./vault_window_size.js";
 
 const DEFAULT_FILTERS = () => ({ search: "", status: null, favoritesOnly: false, showArchived: undefined, generationType: null, tags: [] });
 
@@ -26,6 +27,8 @@ export class VaultApp {
     this.dirtyDiscardHandler = null;
     this.dirtyDialogOptions = null;
     this.wizardOptions = null;
+    this.windowSize = readWindowSizeHint(); // replaced by the vault's own setting once loaded
+    this.resumePlace = null; // where to land on the next open() (set by close({ keepPlace }))
     this._onKeyDown = this._onKeyDown.bind(this);
   }
 
@@ -43,7 +46,13 @@ export class VaultApp {
     if (options.openWizard) {
       this.wizardOptions = options.wizardOptions || {};
       this.view = "wizard";
+    } else if (this.resumePlace && this.getEntry(this.resumePlace.entryId)) {
+      this.selectedEntryId = this.resumePlace.entryId;
+      this.selectedTab = this.resumePlace.tab;
+      this.settingsSection = this.resumePlace.settingsSection;
+      this.view = "detail";
     }
+    this.resumePlace = null;
     this.render();
     // Move focus into the dialog unless a view already claimed it (the init
     // screen and the search box focus themselves).
@@ -94,7 +103,13 @@ export class VaultApp {
     this.close();
   }
 
-  close() {
+  // keepPlace: remember the open entry so the next open() returns to it. Used
+  // after "Open workflow" closes the vault; a plain close starts at the grid.
+  close({ keepPlace = false } = {}) {
+    this.resumePlace =
+      keepPlace && this.view === "detail" && this.selectedEntryId
+        ? { entryId: this.selectedEntryId, tab: this.selectedTab, settingsSection: this.settingsSection }
+        : null;
     if (this.overlay) {
       this.overlay.remove();
       this.overlay = null;
@@ -104,6 +119,7 @@ export class VaultApp {
     this.selectedEntryId = null;
     this.selectedTab = "overview";
     this.settingsSection = "info";
+    this.ui.sidebarOpen = false;
     this.isDirty = false;
     this.dirtySaveHandler = null;
     this.dirtyDiscardHandler = null;
@@ -115,6 +131,11 @@ export class VaultApp {
     try {
       this.state = await VaultAPI.getState();
       applyAccentColor(this.state.settings?.accent_color);
+      const savedSize = this.state.settings?.window_size;
+      if (isWindowSize(savedSize)) {
+        this.windowSize = savedSize;
+        saveWindowSizeHint(savedSize);
+      }
       if (this.state.initialized && this.filters.showArchived === undefined) {
         this.filters.showArchived = !!this.state.settings?.show_archived;
       }
@@ -226,6 +247,7 @@ export class VaultApp {
     this.selectedEntryId = entryId;
     this.selectedTab = tab;
     this.settingsSection = "info";
+    this.ui.sidebarOpen = false;
     this.view = "detail";
     this.render();
   }
@@ -259,6 +281,36 @@ export class VaultApp {
     if (!proceed) return;
     if (section) this.settingsSection = section;
     this.view = "settings";
+    this.render();
+  }
+
+  _paintWindowSize(size) {
+    const modal = this.overlay?.querySelector(".wv-modal");
+    if (!modal) return;
+    if (size === "auto") delete modal.dataset.size;
+    else modal.dataset.size = size;
+  }
+
+  // Applies instantly and is saved with the vault (no Save button), like the
+  // sort order and card size. Rolls back if the save fails.
+  async setWindowSize(size) {
+    if (!isWindowSize(size) || size === this.windowSize) return;
+    const previous = this.windowSize;
+    this.windowSize = size;
+    this._paintWindowSize(size);
+    try {
+      await VaultAPI.postSettings({ window_size: size });
+      saveWindowSizeHint(size);
+      if (this.state?.settings) this.state.settings.window_size = size;
+    } catch (e) {
+      this.windowSize = previous;
+      this._paintWindowSize(previous);
+      showToast(e.message, "error");
+    }
+  }
+
+  setSidebarOpen(open) {
+    this.ui.sidebarOpen = !!open;
     this.render();
   }
 
@@ -312,6 +364,7 @@ export class VaultApp {
       "aria-label": "Workflow Vault",
       tabindex: "-1",
     });
+    if (this.windowSize !== "auto") modal.dataset.size = this.windowSize;
 
     if (!this.state) {
       modal.appendChild(renderLoading());

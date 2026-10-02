@@ -52,10 +52,17 @@
   z-index: 10010;
 }
 
+/* Window width moves in steps rather than stretching with the screen: the
+   modal gets wider at a few breakpoints (Auto) or at the width the user picked
+   (Settings -> Window size, data-size on the element), and never exceeds 92% of
+   the viewport. Wider windows then show more cards, not bigger ones. */
 .wv-modal {
-  width: 92vw;
+  --wv-modal-max: 1400px;
+  width: min(92vw, var(--wv-modal-max));
   height: 88vh;
-  max-width: 1400px;
+  /* Lets the layout below react to the modal's own width (sidebar drawer),
+     which differs from the viewport width once the window size is changeable. */
+  container: wv-modal / inline-size;
   background: var(--wv-bg);
   color: var(--wv-fg);
   border: 1px solid var(--wv-border);
@@ -65,6 +72,41 @@
   overflow: hidden;
   font-size: 13px;
   box-shadow: var(--wv-shadow-md);
+}
+
+@media (min-width: 1800px) {
+  .wv-modal {
+    --wv-modal-max: 1640px;
+  }
+}
+
+@media (min-width: 2300px) {
+  .wv-modal {
+    --wv-modal-max: 2000px;
+  }
+}
+
+@media (min-width: 3000px) {
+  .wv-modal {
+    --wv-modal-max: 2400px;
+  }
+}
+
+/* Manual choice beats the Auto breakpoints above (higher specificity). */
+.wv-modal[data-size="compact"] {
+  --wv-modal-max: 1400px;
+}
+
+.wv-modal[data-size="comfortable"] {
+  --wv-modal-max: 1640px;
+}
+
+.wv-modal[data-size="wide"] {
+  --wv-modal-max: 2000px;
+}
+
+.wv-modal[data-size="ultrawide"] {
+  --wv-modal-max: 2400px;
 }
 
 .wv-dialog {
@@ -1043,22 +1085,28 @@
 /* Grid / cards                                                            */
 /* ---------------------------------------------------------------------- */
 
+/* Cards are exactly as wide as the chosen Card size, on any screen; the column
+   count falls out of how much room there is, and any leftover width becomes
+   even margins on both sides (justify-content: center). The min() lets a single
+   column shrink if the window is ever narrower than one card. */
 .wv-grid {
+  --wv-card-w: 250px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--wv-card-w), 100%), var(--wv-card-w)));
+  justify-content: center;
   gap: 14px;
 }
 
-.wv-grid.wv-grid-cols-2 {
-  grid-template-columns: repeat(2, 1fr);
+.wv-grid.wv-grid-size-small {
+  --wv-card-w: 200px;
 }
 
-.wv-grid.wv-grid-cols-3 {
-  grid-template-columns: repeat(3, 1fr);
+.wv-grid.wv-grid-size-large {
+  --wv-card-w: 320px;
 }
 
-.wv-grid.wv-grid-cols-4 {
-  grid-template-columns: repeat(4, 1fr);
+.wv-grid.wv-grid-size-xlarge {
+  --wv-card-w: 400px;
 }
 
 .wv-grid-density {
@@ -3680,9 +3728,6 @@
 /* ---------------------------------------------------------------------- */
 
 @media (max-width: 760px) {
-  .wv-sidebar {
-    width: 160px;
-  }
   .wv-overview-summary,
   .wv-settings-info-grid,
   .wv-wizard-grid,
@@ -4038,4 +4083,162 @@
 
 .wv-profile-add-actions {
   margin-top: 10px;
+}
+
+/* ---------------------------------------------------------------------------
+   Narrow window: the sidebar becomes a slide-in drawer opened from a button
+   in the top bar, so the grid keeps the room. Keyed on the modal's own width
+   (container query) so it also applies to a manually chosen small window.
+   ------------------------------------------------------------------------ */
+
+.wv-sidebar-toggle,
+.wv-sidebar-scrim {
+  display: none;
+}
+
+@container wv-modal (max-width: 900px) {
+  .wv-body {
+    position: relative;
+  }
+
+  .wv-sidebar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 20;
+    max-width: 85%;
+    transform: translateX(-100%);
+    transition: transform 0.18s ease;
+    box-shadow: none;
+  }
+
+  .wv-body-sidebar-open .wv-sidebar {
+    transform: none;
+    box-shadow: var(--wv-shadow-md);
+  }
+
+  .wv-body-sidebar-open .wv-sidebar-scrim {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    background: rgba(0, 0, 0, 0.35);
+  }
+
+  .wv-sidebar-toggle {
+    display: inline-flex;
+  }
+
+  /* The brand cell no longer needs to line up with a sidebar column. */
+  .wv-topbar-brand {
+    width: auto;
+    padding: 10px 12px;
+  }
+
+  .wv-topbar-title-text {
+    display: none;
+  }
+
+  .wv-topbar-row {
+    flex-wrap: wrap;
+  }
+
+  .wv-search {
+    min-width: 160px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wv-sidebar {
+    transition: none;
+  }
+}
+
+/* Settings -> Window size: one tile per option, each with a miniature of the
+   window drawn to scale on this screen. */
+.wv-ws-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+  margin: 6px 0 8px;
+}
+
+.wv-ws-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 10px 6px 9px;
+  background: transparent;
+  color: var(--wv-fg);
+  border: 1px solid var(--wv-border);
+  border-radius: var(--wv-radius);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.wv-ws-tile:hover {
+  background: var(--wv-hover-bg);
+  border-color: var(--wv-border-strong);
+}
+
+.wv-ws-tile-active,
+.wv-ws-tile-active:hover {
+  border-color: var(--wv-accent);
+  background: var(--wv-accent-soft);
+}
+
+.wv-ws-screen {
+  position: relative;
+  display: block;
+  width: 64px;
+  height: 38px;
+  margin-bottom: 4px;
+  box-sizing: border-box;
+  border: 2px solid var(--wv-faint);
+  border-radius: 4px;
+}
+
+.wv-ws-window {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  height: 62%;
+  transform: translate(-50%, -50%);
+  background: var(--wv-faint);
+  border-radius: 2px;
+}
+
+.wv-ws-window-faded {
+  opacity: 0.35;
+  height: 78%;
+}
+
+/* Trimmed to fit this screen: still choosable (it applies on bigger screens),
+   but visibly not what you'd get right now. */
+.wv-ws-tile-trimmed .wv-ws-here {
+  opacity: 0.65;
+}
+
+.wv-ws-meta.wv-ws-here {
+  color: var(--wv-fg);
+}
+
+.wv-ws-tile-active .wv-ws-screen {
+  border-color: var(--wv-accent);
+}
+
+.wv-ws-tile-active .wv-ws-window {
+  background: var(--wv-accent);
+}
+
+.wv-ws-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wv-ws-meta {
+  font-size: 11px;
+  color: var(--wv-muted);
+  font-variant-numeric: tabular-nums;
 }

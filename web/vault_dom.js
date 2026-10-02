@@ -512,3 +512,94 @@ export function formDialog({ title = "Edit", message = "", fields = [], confirmT
     if (first && first.focus) setTimeout(() => first.focus(), 0);
   });
 }
+
+/**
+ * A small popover menu anchored under a button. items: [{label, icon, danger,
+ * onSelect}] (or {divider: true}). Closes on outside click, Escape (without
+ * closing the vault behind it), Tab, or after an item is chosen. Arrow keys,
+ * Home and End move between items. `container` is where the menu is mounted;
+ * mounting inside the vault overlay keeps it within the focus trap.
+ */
+export function openMenu(anchor, items, { container = document.body, align = "right" } = {}) {
+  closeMenu();
+  const menu = el("div", { className: "wv-menu", role: "menu" });
+  const buttons = [];
+  for (const item of items) {
+    if (item.divider) {
+      menu.appendChild(el("div", { className: "wv-menu-divider", role: "separator" }));
+      continue;
+    }
+    const btn = el(
+      "button",
+      {
+        type: "button",
+        role: "menuitem",
+        className: `wv-menu-item${item.danger ? " wv-menu-item-danger" : ""}`,
+        onclick: () => {
+          closeMenu();
+          item.onSelect?.();
+        },
+      },
+      [item.icon ? el("i", { className: item.icon }) : null, el("span", {}, [item.label])]
+    );
+    buttons.push(btn);
+    menu.appendChild(btn);
+  }
+  container.appendChild(menu);
+
+  const a = anchor.getBoundingClientRect();
+  const m = menu.getBoundingClientRect();
+  const left = align === "right" ? a.right - m.width : a.left;
+  menu.style.left = `${Math.max(8, Math.min(left, window.innerWidth - m.width - 8))}px`;
+  menu.style.top = `${Math.min(a.bottom + 6, window.innerHeight - m.height - 8)}px`;
+  anchor.setAttribute("aria-expanded", "true");
+
+  const onKey = (e) => {
+    if (e.key === "Escape" || e.key === "Tab") {
+      // Capture phase + stopPropagation: Escape must close only the menu, not
+      // the vault (whose own handler listens on the same document).
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      closeMenu();
+      anchor.focus?.();
+      return;
+    }
+    const at = buttons.indexOf(document.activeElement);
+    let next = null;
+    if (e.key === "ArrowDown") next = buttons[(at + 1) % buttons.length];
+    else if (e.key === "ArrowUp") next = buttons[(at - 1 + buttons.length) % buttons.length];
+    else if (e.key === "Home") next = buttons[0];
+    else if (e.key === "End") next = buttons[buttons.length - 1];
+    if (next) {
+      e.preventDefault();
+      e.stopPropagation();
+      next.focus();
+    }
+  };
+  const onDown = (e) => {
+    if (!menu.contains(e.target) && !anchor.contains(e.target)) closeMenu();
+  };
+  document.addEventListener("keydown", onKey, true);
+  document.addEventListener("mousedown", onDown, true);
+  openMenuState = {
+    close() {
+      menu.remove();
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("mousedown", onDown, true);
+      anchor.setAttribute("aria-expanded", "false");
+    },
+  };
+  buttons[0]?.focus();
+  return menu;
+}
+
+let openMenuState = null;
+
+export function closeMenu() {
+  if (openMenuState) {
+    openMenuState.close();
+    openMenuState = null;
+  }
+}

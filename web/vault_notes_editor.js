@@ -160,9 +160,11 @@ export function renderNotesEditor({ notes = [], onChange = () => {} } = {}) {
         )
       );
     });
-    if (data.length) subtabRow.appendChild(seg);
+    // With a single note the card below already shows its name, so the switcher
+    // would only be a button that does nothing; it appears once there are two.
+    if (data.length > 1) subtabRow.appendChild(seg);
     subtabRow.appendChild(
-      el("button", { type: "button", className: "wv-btn-link", onclick: addNote }, [el("i", { className: "pi pi-plus" }), "Add note"])
+      el("button", { type: "button", className: "wv-btn wv-btn-small wv-docs-add", onclick: addNote }, [el("i", { className: "pi pi-plus" }), "Add note"])
     );
   }
 

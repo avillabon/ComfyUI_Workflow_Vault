@@ -55,7 +55,7 @@
 /* Window width moves in steps rather than stretching with the screen: the
    modal gets wider at a few breakpoints (Auto) or at the width the user picked
    (Settings -> Window size, data-size on the element), and never exceeds 92% of
-   the viewport. Wider windows then show more cards, not bigger ones. */
+   the viewport. */
 .wv-modal {
   --wv-modal-max: 1400px;
   width: min(92vw, var(--wv-modal-max));
@@ -1085,15 +1085,15 @@
 /* Grid / cards                                                            */
 /* ---------------------------------------------------------------------- */
 
-/* Cards are exactly as wide as the chosen Card size, on any screen; the column
-   count falls out of how much room there is, and any leftover width becomes
-   even margins on both sides (justify-content: center). The min() lets a single
+/* Cards scale with the window. Card size sets the narrowest a card gets; the
+   cards then stretch (1fr) to fill the row, and another column appears as soon
+   as there is room for one. auto-fill (not auto-fit) keeps a vault with only a
+   few entries from stretching them across the whole row. The min() lets a single
    column shrink if the window is ever narrower than one card. */
 .wv-grid {
   --wv-card-w: 250px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(var(--wv-card-w), 100%), var(--wv-card-w)));
-  justify-content: center;
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--wv-card-w), 100%), 1fr));
   gap: 14px;
 }
 
@@ -1152,7 +1152,7 @@
 }
 
 .wv-card:hover .wv-card-thumb img {
-  transform: scale(1.05);
+  transform: scale(1.025);
 }
 
 .wv-card-thumb-placeholder {
@@ -4241,4 +4241,457 @@
   font-size: 11px;
   color: var(--wv-muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------------------
+   Entry detail polish: tab counts, shortcut tiles, sticky save bar, "more" menu
+   ------------------------------------------------------------------------ */
+
+.wv-tab .wv-count-badge {
+  margin-left: 6px;
+}
+
+/* Summary tiles that jump to the tab managing what they count. */
+.wv-meta-tile-link {
+  display: block;
+  text-align: left;
+  border: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.wv-meta-tile-link:hover {
+  background: var(--wv-accent-soft);
+}
+
+.wv-meta-tile-link:hover .wv-meta-tile-label {
+  color: var(--wv-accent);
+}
+
+/* Save / Discard stay pinned to the bottom of the Details tab while the form
+   scrolls. The negative margins cancel the form card's 16px padding, so the bar
+   spans the card and doubles as its footer once you reach the end. */
+.wv-sticky-actions {
+  position: sticky;
+  bottom: -14px; /* sticky offsets ignore the scroller's 14px bottom padding */
+  z-index: 5;
+  margin: 16px -16px -16px;
+  padding: 12px 16px;
+  background: var(--wv-bg);
+  border-top: 1px solid var(--wv-border);
+}
+
+.wv-unsaved-note {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--wv-muted);
+}
+
+.wv-menu {
+  position: fixed;
+  z-index: 10020;
+  min-width: 190px;
+  padding: 5px;
+  background: var(--wv-surface);
+  border: 1px solid var(--wv-border-strong);
+  border-radius: var(--wv-radius-lg);
+  box-shadow: var(--wv-shadow-md);
+}
+
+.wv-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  border-radius: var(--wv-radius);
+  color: var(--wv-fg);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wv-menu-item i {
+  width: 14px;
+  font-size: 13px;
+  color: var(--wv-muted);
+}
+
+.wv-menu-item:hover,
+.wv-menu-item:focus-visible {
+  background: var(--wv-hover-bg);
+}
+
+.wv-menu-item-danger,
+.wv-menu-item-danger i {
+  color: var(--wv-danger);
+}
+
+.wv-menu-item-danger:hover,
+.wv-menu-item-danger:focus-visible {
+  background: rgba(227, 101, 95, 0.12);
+}
+
+.wv-menu-divider {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--wv-border);
+}
+
+/* ---------------------------------------------------------------------------
+   Premium polish: visible Open button, shortcuts help, loading skeleton,
+   fade-in, and a two-column entry overview on wide windows
+   ------------------------------------------------------------------------ */
+
+.wv-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Keyboard shortcuts dialog */
+.wv-shortcuts {
+  min-width: 340px;
+}
+
+.wv-shortcuts-group {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wv-faint);
+}
+
+.wv-shortcuts-group:first-child {
+  margin-top: 0;
+}
+
+.wv-shortcuts-row {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 0;
+  font-size: 13px;
+}
+
+.wv-shortcuts-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.wv-kbd {
+  display: inline-block;
+  min-width: 22px;
+  padding: 2px 6px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--wv-fg);
+  background: var(--wv-bg-alt);
+  border: 1px solid var(--wv-border-strong);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+}
+
+.wv-shortcuts-note {
+  margin: 14px 0 0;
+  font-size: 12px;
+}
+
+/* Loading skeleton: the grid view's silhouette with a soft shimmer. */
+.wv-skeleton {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.wv-skel {
+  background: linear-gradient(90deg, var(--wv-hover-bg) 0%, rgba(255, 255, 255, 0.11) 50%, var(--wv-hover-bg) 100%);
+  background-size: 200% 100%;
+  border-radius: 6px;
+  animation: wv-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes wv-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+.wv-skel-topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border-bottom: 1px solid var(--wv-border);
+}
+
+.wv-skel-brand {
+  width: 150px;
+  height: 26px;
+}
+
+.wv-skel-search {
+  width: 300px;
+  max-width: 40%;
+  height: 30px;
+}
+
+.wv-skel-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wv-skel-sidebar {
+  width: 248px;
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 16px;
+  background: var(--wv-surface);
+  border-right: 1px solid var(--wv-border);
+}
+
+.wv-skel-grid {
+  flex: 1;
+  align-content: start;
+  padding: 16px 20px;
+  overflow: hidden;
+}
+
+.wv-skel-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 14px;
+  background: var(--wv-card-bg);
+  border: 1px solid var(--wv-border);
+  border-radius: var(--wv-radius-lg);
+  overflow: hidden;
+}
+
+.wv-skel-thumb {
+  aspect-ratio: 16 / 10;
+  border-radius: 0;
+}
+
+.wv-skel-line {
+  height: 11px;
+  margin: 0 14px;
+}
+
+.wv-skel-line-title {
+  width: 60%;
+  height: 14px;
+}
+
+.wv-skel-line-short {
+  width: 40%;
+}
+
+.wv-skel-sidebar .wv-skel-line {
+  margin: 0;
+}
+
+/* Cards ease in once per load (see controller.ui.animateEnter), lightly staggered. */
+.wv-grid-enter .wv-card {
+  animation: wv-card-in 0.3s ease both;
+}
+
+@keyframes wv-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.wv-grid-enter .wv-card:nth-child(2) {
+  animation-delay: 28ms;
+}
+
+.wv-grid-enter .wv-card:nth-child(3) {
+  animation-delay: 56ms;
+}
+
+.wv-grid-enter .wv-card:nth-child(4) {
+  animation-delay: 84ms;
+}
+
+.wv-grid-enter .wv-card:nth-child(5) {
+  animation-delay: 112ms;
+}
+
+.wv-grid-enter .wv-card:nth-child(6) {
+  animation-delay: 140ms;
+}
+
+.wv-grid-enter .wv-card:nth-child(7) {
+  animation-delay: 168ms;
+}
+
+.wv-grid-enter .wv-card:nth-child(8) {
+  animation-delay: 196ms;
+}
+
+.wv-grid-enter .wv-card:nth-child(9) {
+  animation-delay: 224ms;
+}
+
+.wv-grid-enter .wv-card:nth-child(10) {
+  animation-delay: 252ms;
+}
+
+.wv-grid-enter .wv-card:nth-child(11) {
+  animation-delay: 280ms;
+}
+
+.wv-grid-enter .wv-card:nth-child(12) {
+  animation-delay: 308ms;
+}
+
+.wv-grid-enter .wv-card:nth-child(13) {
+  animation-delay: 336ms;
+}
+
+.wv-grid-enter .wv-card:nth-child(14) {
+  animation-delay: 364ms;
+}
+
+.wv-grid-enter .wv-card:nth-child(15) {
+  animation-delay: 392ms;
+}
+
+.wv-grid-enter .wv-card:nth-child(16) {
+  animation-delay: 420ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wv-skel,
+  .wv-grid-enter .wv-card {
+    animation: none;
+  }
+}
+
+@container wv-modal (max-width: 900px) {
+  .wv-skel-sidebar {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Entry detail page layout. Every tab renders inside one centered .wv-page, so
+   Overview, Notes, Versions, Examples and Details share a single width.
+   ------------------------------------------------------------------------ */
+
+.wv-page {
+  width: 100%;
+  max-width: 1320px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+@container wv-modal (min-width: 1900px) {
+  .wv-page {
+    max-width: 1600px;
+  }
+}
+
+@container wv-modal (min-width: 2300px) {
+  .wv-page {
+    max-width: 1900px;
+  }
+}
+
+/* Wide form, but the thumbnail column stays a sensible size. */
+.wv-details-card .wv-settings-info-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 420px);
+}
+
+.wv-details-card {
+  padding: 16px;
+  background: var(--wv-surface);
+  border: 1px solid var(--wv-border);
+  border-radius: var(--wv-radius-lg);
+}
+
+/* Notes: the switcher only shows with 2+ notes, so Add note sits at the right
+   and the row stays aligned either way. */
+.wv-docs-add {
+  margin-left: auto;
+}
+
+/* The segmented control carries a 16px bottom margin for its other uses; in this
+   row it would sit above the button's centerline. */
+.wv-docs-subtab-row .wv-segmented {
+  margin-bottom: 0;
+}
+
+/* Versions: cards flow into columns instead of one stretched-wide list. */
+.wv-version-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+  align-items: start;
+}
+
+/* Overview: summary and examples are matching panels. Stacked on narrower
+   windows; side by side (tops aligned, equal height) on wide ones. */
+.wv-overview-gallery-section {
+  margin-top: 0; /* the summary's own bottom margin spaces the stacked layout */
+  padding: 16px;
+  background: var(--wv-surface);
+  border: 1px solid var(--wv-border);
+  border-radius: var(--wv-radius-lg);
+}
+
+@container wv-modal (min-width: 1280px) {
+  .wv-overview {
+    display: grid;
+    grid-template-columns: minmax(360px, 440px) minmax(0, 1fr);
+    gap: 20px;
+    align-items: stretch;
+  }
+
+  .wv-overview-summary {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    margin-bottom: 0;
+  }
+
+  /* One or two examples grow to use the room (capped so a lone image doesn't
+     become enormous); more examples simply fill more columns. */
+  .wv-ex-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 900px));
+    overflow: visible;
+    scroll-snap-type: none;
+    padding-bottom: 0;
+  }
+
+  .wv-ex-card {
+    flex: none;
+    max-width: none;
+  }
 }

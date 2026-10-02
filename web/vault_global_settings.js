@@ -636,7 +636,7 @@ function renderWindowSizePanel(controller) {
   const panelEl = panel(
     "Window size",
     "pi pi-window-maximize",
-    "How wide the vault window can grow. Wider windows fit more cards per row; the cards themselves keep their size (change that with the card size menu above the grid). Saved with this vault, so it applies in any browser."
+    "How wide the vault window can grow. A wider window fits more cards per row, and the cards scale to fill the row (the card size menu above the grid sets how small they can get). Saved with this vault, so it applies in any browser."
   );
 
   const viewport = window.innerWidth;

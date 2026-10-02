@@ -7,9 +7,10 @@ import { openCurrentVersion } from "./vault_detail.js";
 import { buildCompareSlider } from "./vault_compare_slider.js";
 import { tagCountsFrom } from "./vault_tag_input.js";
 import { renderProfileSwitcher } from "./vault_profiles.js";
+import { showShortcutsDialog } from "./vault_shortcuts.js";
 
 // App version (SemVer). Keep in sync with pyproject.toml; shown in the footer.
-export const VAULT_VERSION = "1.8.0";
+export const VAULT_VERSION = "1.9.0";
 export const AUTHOR_NAME = "Alex Villabón";
 export const AUTHOR_URL = "https://www.youtube.com/@alexvillabon";
 export const REPO_URL = "https://github.com/avillabon/ComfyUI_Workflow_Vault";
@@ -71,8 +72,22 @@ export function renderGenTypePicker(selected = [], onChange) {
 // Loading / init
 // ---------------------------------------------------------------------------
 
+// A skeleton of the grid view (top bar, sidebar, a few cards) while the vault
+// loads, so the window opens at its final shape instead of flashing text.
 export function renderLoading() {
-  return el("div", { className: "wv-loading" }, ["Loading vault…"]);
+  const block = (cls) => el("div", { className: `wv-skel ${cls}` });
+  const card = () =>
+    el("div", { className: "wv-skel-card" }, [block("wv-skel-thumb"), block("wv-skel-line wv-skel-line-title"), block("wv-skel-line"), block("wv-skel-line wv-skel-line-short")]);
+
+  const topbar = el("div", { className: "wv-skel-topbar" }, [block("wv-skel-brand"), block("wv-skel-search")]);
+  const sidebar = el("div", { className: "wv-skel-sidebar" }, Array.from({ length: 7 }, () => block("wv-skel-line")));
+  const grid = el("div", { className: "wv-grid wv-grid-size-medium wv-skel-grid" }, Array.from({ length: 8 }, card));
+
+  return el("div", { className: "wv-skeleton", role: "status", "aria-label": "Loading vault" }, [
+    el("span", { className: "wv-sr-only" }, ["Loading vault…"]),
+    topbar,
+    el("div", { className: "wv-skel-body" }, [sidebar, grid]),
+  ]);
 }
 
 export function renderInitView(controller) {
@@ -217,6 +232,7 @@ export function renderTopbar(controller) {
   const search = el("input", {
     className: "wv-input wv-search",
     type: "search",
+    title: "Press / to search from anywhere in the grid",
     placeholder: "Search workflows, tags, descriptions…",
     value: filters.search,
     oninput: (e) => {
@@ -232,6 +248,11 @@ export function renderTopbar(controller) {
       onclick: () => controller.openWizard({ mode: "full" }),
     },
     ["+ New Entry"]
+  );
+  const shortcutsBtn = el(
+    "button",
+    { className: "wv-icon-btn wv-icon-btn-lg", title: "Keyboard shortcuts (?)", "aria-label": "Keyboard shortcuts", onclick: () => showShortcutsDialog() },
+    [el("i", { className: "pi pi-bolt" })]
   );
   const settingsBtn = el(
     "button",
@@ -308,7 +329,7 @@ export function renderTopbar(controller) {
     },
     [el("i", { className: "pi pi-filter" })]
   );
-  const row1 = el("div", { className: "wv-topbar-row" }, [sidebarToggle, search, spacer(), newEntryBtn, settingsBtn, closeBtn]);
+  const row1 = el("div", { className: "wv-topbar-row" }, [sidebarToggle, search, spacer(), newEntryBtn, shortcutsBtn, settingsBtn, closeBtn]);
   const row2 = el("div", { className: "wv-topbar-row" }, [sortSelect, statusSelect, favoritesToggle, archivedToggle]);
   controls.appendChild(row1);
   controls.appendChild(row2);
@@ -348,6 +369,12 @@ export function renderGridBody(controller) {
     main.appendChild(renderEmptyState(controller));
   } else {
     const grid = el("div", { className: `wv-grid wv-grid-size-${cardSize(controller)}` });
+    // Cards fade in once after a load or a vault switch — not on every re-render,
+    // or typing in the search box would make the whole grid flicker.
+    if (controller.ui.animateEnter) {
+      grid.classList.add("wv-grid-enter");
+      controller.ui.animateEnter = false;
+    }
     for (const entry of entries) {
       grid.appendChild(renderCard(entry, controller));
     }
@@ -645,6 +672,7 @@ function renderCard(entry, controller) {
     className: "wv-card",
     role: "button",
     tabindex: "0",
+    dataset: { entryId: entry.id },
     "aria-label": `Open ${entry.name}`,
     onclick: () => controller.openEntry(entry.id),
     onkeydown: onActivate(() => controller.openEntry(entry.id)),
@@ -684,21 +712,25 @@ function renderCard(entry, controller) {
       [el("i", { className: entry.favorite ? "pi pi-star-fill" : "pi pi-star" })]
     )
   );
-  thumb.appendChild(
-    el(
-      "button",
-      {
-        className: "wv-card-open",
-        title: "Open workflow",
-        "aria-label": `Open ${entry.name} workflow`,
-        onclick: (e) => {
-          e.stopPropagation();
-          openCurrentVersion(controller, entry);
+  // Round play button, revealed on hover/focus. An entry with no saved workflow
+  // has nothing to open, so it gets none.
+  if (entry.current_version_id) {
+    thumb.appendChild(
+      el(
+        "button",
+        {
+          className: "wv-card-open",
+          title: "Open workflow in ComfyUI (O)",
+          "aria-label": `Open ${entry.name} workflow`,
+          onclick: (e) => {
+            e.stopPropagation();
+            openCurrentVersion(controller, entry);
+          },
         },
-      },
-      [el("i", { className: "pi pi-play" })]
-    )
-  );
+        [el("i", { className: "pi pi-play" })]
+      )
+    );
+  }
   const genTypes = (entry.generation_types || []).map((id) => GENERATION_TYPE_MAP[id]).filter(Boolean);
   if (genTypes.length) {
     const MAX_BADGES = 2;

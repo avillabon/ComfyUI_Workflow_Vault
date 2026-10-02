@@ -13,9 +13,9 @@ export const WINDOW_SIZES = [
   ["ultrawide", "Ultra-wide", 2400, "Ultra-wide monitors"],
 ];
 
-// Grid card widths per Card size, and the fixed chrome around the grid. These
-// mirror .wv-grid-size-* and .wv-sidebar/.wv-main in workflow_vault.css and are
-// only used to estimate "cards per row" for the picker.
+// Narrowest card width per Card size (cards stretch from there), and the fixed
+// chrome around the grid. These mirror .wv-grid-size-* and .wv-sidebar/.wv-main
+// in workflow_vault.css and are only used to estimate "cards per row" for the picker.
 const CARD_WIDTH = { small: 200, medium: 250, large: 320, xlarge: 400 };
 const GRID_GAP = 14;
 const SIDEBAR_WIDTH = 248;

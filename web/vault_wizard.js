@@ -575,7 +575,7 @@ function renderUpdateForm(controller) {
         }
         controller.setDirty(false);
         await controller.refresh();
-        if (openAfterSave) await controller.openEntry(entry.id, "settings");
+        if (openAfterSave) await controller.openEntry(entry.id, "versions");
         showToast(`Saved to "${entry.name}".`, "success");
         return true;
       } catch (e) {

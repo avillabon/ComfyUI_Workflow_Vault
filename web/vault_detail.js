@@ -1,7 +1,7 @@
 // Entry detail view: header, tab router, plus the Overview and Settings
 // tabs (the others live in their own modules to keep files manageable).
 
-import { el, clear, videoEl, formatDate, showToast, confirmDialog, promptDialog, openImageLightbox, toggleField, createProgressStatus } from "./vault_dom.js";
+import { el, clear, videoEl, formatDate, showToast, confirmDialog, promptDialog, openImageLightbox, toggleField, createProgressStatus, openMenu, closeMenu } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
 import { STATUS_LABELS, STATUS_ORDER, renderGenTypePicker, GENERATION_TYPE_MAP } from "./vault_modal.js";
 import { openWorkflowInGraph } from "./vault_workflow.js";
@@ -13,10 +13,15 @@ import { renderThumbnailField } from "./vault_thumbnail_input.js";
 import { buildCompareSlider } from "./vault_compare_slider.js";
 import { renderMarkdown } from "./vault_markdown.js";
 
+// Everything about an entry is one click away: Examples and Versions used to sit
+// two levels down under Settings, so they are tabs of their own now, and the
+// edit form is "Details". The count badges come from the entry itself.
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "notes", label: "Notes" },
-  { id: "settings", label: "Settings" },
+  { id: "versions", label: "Versions", count: (entry) => (entry.versions || []).length },
+  { id: "examples", label: "Examples", count: (entry) => (entry.examples || []).length },
+  { id: "details", label: "Details" },
 ];
 
 export function renderDetailView(controller) {
@@ -41,36 +46,97 @@ export function renderDetailView(controller) {
       "Open Workflow",
     ])
   );
+  // Entry-level actions live here, reachable from every tab, instead of at the
+  // bottom of the Details form.
+  const moreBtn = el(
+    "button",
+    {
+      className: "wv-icon-btn wv-icon-btn-lg",
+      title: "More actions",
+      "aria-label": "More actions",
+      "aria-haspopup": "menu",
+      "aria-expanded": "false",
+      onclick: () => {
+        if (moreBtn.getAttribute("aria-expanded") === "true") {
+          closeMenu();
+          return;
+        }
+        openMenu(
+          moreBtn,
+          [
+            { label: "Duplicate", icon: "pi pi-clone", onSelect: () => duplicateEntryAction(controller, entry) },
+            entry.status === "archived"
+              ? { label: "Restore from Archive", icon: "pi pi-undo", onSelect: () => restoreEntryAction(controller, entry) }
+              : { label: "Archive", icon: "pi pi-inbox", onSelect: () => archiveEntryAction(controller, entry) },
+            { divider: true },
+            { label: "Delete…", icon: "pi pi-trash", danger: true, onSelect: () => deleteEntryAction(controller, entry) },
+          ],
+          { container: controller.overlay || document.body }
+        );
+      },
+    },
+    [el("i", { className: "pi pi-ellipsis-h" })]
+  );
+  header.appendChild(moreBtn);
   header.appendChild(el("button", { className: "wv-icon-btn wv-icon-btn-lg", title: "Close", onclick: () => controller.requestClose() }, [el("i", { className: "pi pi-times" })]));
   wrap.appendChild(header);
 
-  const tabBar = el("div", { className: "wv-tab-bar" });
+  const tabBar = el("div", {
+    className: "wv-tab-bar",
+    role: "tablist",
+    // Arrow keys move between tabs (WAI-ARIA tabs pattern). Switching re-renders
+    // the view, so focus is handed back to the newly active tab afterwards.
+    onkeydown: async (e) => {
+      const step = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+      const at = TABS.findIndex((t) => t.id === controller.selectedTab);
+      if ((!step && e.key !== "Home" && e.key !== "End") || at < 0 || !(e.target instanceof Element) || !e.target.classList.contains("wv-tab")) return;
+      e.preventDefault();
+      const next = e.key === "Home" ? 0 : e.key === "End" ? TABS.length - 1 : (at + step + TABS.length) % TABS.length;
+      await controller.setTab(TABS[next].id);
+      controller.overlay?.querySelector(".wv-tab-active")?.focus();
+    },
+  });
   for (const tab of TABS) {
-    tabBar.appendChild(
-      el(
-        "button",
-        {
-          className: `wv-tab${controller.selectedTab === tab.id ? " wv-tab-active" : ""}`,
-          onclick: () => controller.setTab(tab.id),
-        },
-        [tab.label]
-      )
+    const active = controller.selectedTab === tab.id;
+    const btn = el(
+      "button",
+      {
+        className: `wv-tab${active ? " wv-tab-active" : ""}`,
+        role: "tab",
+        "aria-selected": String(active),
+        // Only the active tab is in the Tab order; arrows reach the rest.
+        tabindex: active ? "0" : "-1",
+        onclick: () => controller.setTab(tab.id),
+      },
+      [tab.label]
     );
+    if (tab.count) btn.appendChild(el("span", { className: "wv-count-badge" }, [String(tab.count(entry))]));
+    tabBar.appendChild(btn);
   }
   wrap.appendChild(tabBar);
 
+  // Every tab renders inside the same centered page container, so they share
+  // one width instead of each picking its own.
   const content = el("div", { className: "wv-tab-content" });
+  const page = el("div", { className: "wv-page" });
   switch (controller.selectedTab) {
     case "notes":
-      content.appendChild(renderDocsTab(controller, entry));
+      page.appendChild(renderDocsTab(controller, entry));
       break;
-    case "settings":
-      content.appendChild(renderSettingsTab(controller, entry));
+    case "examples":
+      page.appendChild(renderExamplesTab(controller, entry));
+      break;
+    case "versions":
+      page.appendChild(renderVersionsTab(controller, entry));
+      break;
+    case "details":
+      page.appendChild(renderDetailsCard(renderEntryMetadataForm(controller, entry)));
       break;
     default:
-      content.appendChild(renderOverviewTab(controller, entry));
+      page.appendChild(renderOverviewTab(controller, entry));
       break;
   }
+  content.appendChild(page);
   wrap.appendChild(content);
 
   return wrap;
@@ -194,16 +260,24 @@ function renderOverviewSummary(controller, entry) {
 
   const updatedLabel = dateOnly(entry.updated_at);
 
-  const tile = (label, valueNode) =>
-    el("div", { className: "wv-meta-tile" }, [
+  // `goTo` makes a tile a shortcut to the tab that manages what it counts.
+  const tile = (label, valueNode, goTo) => {
+    const children = [
       el("div", { className: "wv-meta-tile-label" }, [label]),
       el("div", { className: "wv-meta-tile-value" }, [valueNode]),
-    ]);
+    ];
+    if (!goTo) return el("div", { className: "wv-meta-tile" }, children);
+    return el(
+      "button",
+      { type: "button", className: "wv-meta-tile wv-meta-tile-link", title: `Go to ${label}`, onclick: () => controller.setTab(goTo) },
+      children
+    );
+  };
 
   info.appendChild(
     el("div", { className: "wv-meta-tiles" }, [
-      tile("Versions", String(versionCount)),
-      tile("Examples", String(exampleCount)),
+      tile("Versions", String(versionCount), "versions"),
+      tile("Examples", String(exampleCount), "examples"),
       tile("Generation type", genTypeValue),
       tile("Updated", updatedLabel),
     ])
@@ -304,6 +378,7 @@ function renderEntryMetadataForm(controller, entry) {
   });
 
   function markDirty() {
+    syncSaveBar(true);
     controller.setDirty(true, {
       saveHandler: saveEntryMetadata,
       discardHandler: () => controller.render(),
@@ -340,9 +415,18 @@ function renderEntryMetadataForm(controller, entry) {
   grid.appendChild(rightCol);
   wrap.appendChild(grid);
 
-  const actions = el("div", { className: "wv-settings-actions" });
+  // Sticky bar pinned to the bottom of the tab, so Save is reachable without
+  // scrolling the form. Both buttons stay disabled until something changes.
+  const actions = el("div", { className: "wv-settings-actions wv-sticky-actions" });
   const progress = createProgressStatus();
   let saveBtn = null;
+  let discardBtn = null;
+  const unsavedNote = el("span", { className: "wv-unsaved-note", "aria-live": "polite" });
+  function syncSaveBar(dirty) {
+    if (saveBtn) saveBtn.disabled = !dirty;
+    if (discardBtn) discardBtn.disabled = !dirty;
+    unsavedNote.textContent = dirty ? "Unsaved changes" : "";
+  }
   async function saveEntryMetadata() {
     const name = nameInput.value.trim();
     if (!name) {
@@ -405,140 +489,109 @@ function renderEntryMetadataForm(controller, entry) {
     "button",
     {
       className: "wv-btn wv-btn-primary",
+      disabled: true,
       onclick: saveEntryMetadata,
     },
-    ["Save Changes"]
+    [el("i", { className: "pi pi-save" }), "Save changes"]
   );
-  actions.appendChild(saveBtn);
-  actions.appendChild(progress.element);
-
-  actions.appendChild(
-    el(
-      "button",
-      {
-        className: "wv-btn",
-        onclick: () => {
-          controller.setDirty(false);
-          controller.render();
-        },
-      },
-      ["Discard Changes"]
-    )
-  );
-
-  const archiveBtn =
-    entry.status === "archived"
-      ? el(
-          "button",
-          {
-            className: "wv-btn",
-            onclick: async () => {
-              try {
-                await VaultAPI.archiveEntry(entry.id, { archived: false });
-                await controller.refresh();
-                showToast("Entry restored.", "success");
-              } catch (e) {
-                showToast(e.message, "error");
-              }
-            },
-          },
-          [el("i", { className: "pi pi-undo" }), "Restore from Archive"]
-        )
-      : el(
-          "button",
-          {
-            className: "wv-btn wv-btn-danger",
-            onclick: async () => {
-              const ok = await confirmDialog({
-                title: "Archive this entry?",
-                message: `"${entry.name}" will be marked as archived and hidden from the main view by default. You can restore it later from Overview or by enabling "Show archived".`,
-                confirmText: "Archive",
-                danger: true,
-              });
-              if (!ok) return;
-              try {
-                await VaultAPI.archiveEntry(entry.id, { archived: true });
-                await controller.refresh();
-                showToast("Entry archived.", "success");
-              } catch (e) {
-                showToast(e.message, "error");
-              }
-            },
-          },
-          [el("i", { className: "pi pi-inbox" }), "Archive Entry"]
-        );
-
-  const deleteBtn = el(
-    "button",
-    {
-      className: "wv-btn wv-btn-danger",
-      onclick: async () => {
-        const trash = controller.state?.trash_label || "Trash";
-        const ok = await confirmDialog({
-          title: "Delete this entry?",
-          message: `"${entry.name}" and all its versions, examples, notes, and media will be removed from your vault and moved to the ${trash}. This can't be undone from inside the vault — you'd restore it from the ${trash}.`,
-          confirmText: "Delete",
-          danger: true,
-        });
-        if (!ok) return;
-        try {
-          const res = await VaultAPI.deleteEntry(entry.id);
-          controller.setDirty(false);
-          controller.selectedEntryId = null;
-          controller.view = "grid";
-          await controller.refresh();
-          showToast(
-            res.method === "permanent" ? "Entry permanently deleted." : `Entry moved to the ${trash}.`,
-            "success"
-          );
-        } catch (e) {
-          showToast(e.message, "error");
-        }
-      },
-    },
-    [el("i", { className: "pi pi-trash" }), "Delete Entry"]
-  );
-
-  const duplicateBtn = el(
+  discardBtn = el(
     "button",
     {
       className: "wv-btn",
-      onclick: async () => {
-        const name = await promptDialog({
-          title: "Duplicate entry",
-          message:
-            "Creates a new entry with the same thumbnail, tags, generation types, examples, and notes — plus just the current version. Give it a unique name:",
-          defaultValue: `${entry.name} copy`,
-          placeholder: "New entry name",
-          confirmText: "Duplicate",
-        });
-        if (name === null) return; // cancelled
-        const trimmed = name.trim();
-        if (!trimmed) {
-          showToast("Name is required.", "error");
-          return;
-        }
-        try {
-          const newEntry = await VaultAPI.duplicateEntry(entry.id, trimmed);
-          controller.setDirty(false);
-          await controller.refresh();
-          await controller.openEntry(newEntry.id);
-          showToast(`Duplicated as "${newEntry.name}".`, "success");
-        } catch (e) {
-          showToast(e.message, "error");
-        }
+      disabled: true,
+      onclick: () => {
+        controller.setDirty(false);
+        controller.render();
       },
     },
-    [el("i", { className: "pi pi-clone" }), "Duplicate"]
+    ["Discard"]
   );
-
-  actions.appendChild(el("div", { className: "wv-topbar-spacer" }));
-  actions.appendChild(duplicateBtn);
-  actions.appendChild(archiveBtn);
-  actions.appendChild(deleteBtn);
+  actions.appendChild(saveBtn);
+  actions.appendChild(discardBtn);
+  actions.appendChild(progress.element);
+  actions.appendChild(unsavedNote);
 
   wrap.appendChild(actions);
   return wrap;
+}
+
+// --- Entry-level actions (header "more" menu) ------------------------------
+
+async function duplicateEntryAction(controller, entry) {
+  if (!(await controller.checkDirty())) return; // the copy would not include unsaved edits
+  const name = await promptDialog({
+    title: "Duplicate entry",
+    message:
+      "Creates a new entry with the same thumbnail, tags, generation types, examples, and notes — plus just the current version. Give it a unique name:",
+    defaultValue: `${entry.name} copy`,
+    placeholder: "New entry name",
+    confirmText: "Duplicate",
+  });
+  if (name === null) return; // cancelled
+  const trimmed = name.trim();
+  if (!trimmed) {
+    showToast("Name is required.", "error");
+    return;
+  }
+  try {
+    const newEntry = await VaultAPI.duplicateEntry(entry.id, trimmed);
+    controller.setDirty(false);
+    await controller.refresh();
+    await controller.openEntry(newEntry.id);
+    showToast(`Duplicated as "${newEntry.name}".`, "success");
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+async function restoreEntryAction(controller, entry) {
+  if (!(await controller.checkDirty())) return;
+  try {
+    await VaultAPI.archiveEntry(entry.id, { archived: false });
+    await controller.refresh();
+    showToast("Entry restored.", "success");
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+async function archiveEntryAction(controller, entry) {
+  if (!(await controller.checkDirty())) return;
+  const ok = await confirmDialog({
+    title: "Archive this entry?",
+    message: `"${entry.name}" will be marked as archived and hidden from the main view by default. You can restore it later from the ⋯ menu or by enabling "Show archived".`,
+    confirmText: "Archive",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await VaultAPI.archiveEntry(entry.id, { archived: true });
+    await controller.refresh();
+    showToast("Entry archived.", "success");
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+async function deleteEntryAction(controller, entry) {
+  const trash = controller.state?.trash_label || "Trash";
+  const ok = await confirmDialog({
+    title: "Delete this entry?",
+    message: `"${entry.name}" and all its versions, examples, notes, and media will be removed from your vault and moved to the ${trash}. This can't be undone from inside the vault — you'd restore it from the ${trash}.`,
+    confirmText: "Delete",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    const res = await VaultAPI.deleteEntry(entry.id);
+    controller.setDirty(false);
+    controller.selectedEntryId = null;
+    controller.view = "grid";
+    await controller.refresh();
+    showToast(res.method === "permanent" ? "Entry permanently deleted." : `Entry moved to the ${trash}.`, "success");
+  } catch (e) {
+    showToast(e.message, "error");
+  }
 }
 
 function renderStatsTiles(entry) {
@@ -575,10 +628,18 @@ function renderExampleGallerySection(controller, entry) {
 
   const header = el("div", { className: "wv-section-header" }, [el("h3", {}, ["Examples"])]);
   if (examples.length) header.appendChild(el("span", { className: "wv-count-badge" }, [String(examples.length)]));
+  header.appendChild(el("div", { className: "wv-topbar-spacer" }));
+  header.appendChild(
+    el(
+      "button",
+      { className: "wv-btn wv-btn-small", onclick: () => controller.setTab("examples") },
+      [el("i", { className: examples.length ? "pi pi-pencil" : "pi pi-plus" }), examples.length ? "Edit examples" : "Add examples"]
+    )
+  );
   section.appendChild(header);
 
   if (!examples.length) {
-    section.appendChild(el("p", { className: "wv-muted" }, ["No example media yet. Add some in the Settings tab."]));
+    section.appendChild(el("p", { className: "wv-muted" }, ["No example media yet. Add some in the Examples tab."]));
     return section;
   }
 
@@ -845,56 +906,12 @@ function renderGalleryThumb(entry, item) {
 }
 
 // ---------------------------------------------------------------------------
-// Settings tab: editable workflow details, versions, and examples, shown one
-// section at a time via a segmented control.
+// Examples, Versions and Details tabs
 // ---------------------------------------------------------------------------
 
-const SETTINGS_SECTIONS = [
-  { id: "info", label: "Workflow Details" },
-  { id: "versions", label: "Versions" },
-  { id: "examples", label: "Examples" },
-];
-
-function renderSettingsTab(controller, entry) {
-  const wrap = el("div", { className: "wv-settings-tab" });
-  controller.settingsSection = controller.settingsSection || "info";
-
-  const counts = { versions: (entry.versions || []).length, examples: (entry.examples || []).length };
-
-  const seg = el("div", { className: "wv-segmented" });
-  for (const section of SETTINGS_SECTIONS) {
-    const btn = el(
-      "button",
-      {
-        className: `wv-segmented-btn${controller.settingsSection === section.id ? " wv-segmented-btn-active" : ""}`,
-        onclick: async () => {
-          if (controller.settingsSection === section.id) return;
-          const proceed = await controller.checkDirty();
-          if (!proceed) return;
-          controller.settingsSection = section.id;
-          controller.render();
-        },
-      },
-      [section.label]
-    );
-    if (counts[section.id] != null) btn.appendChild(el("span", { className: "wv-count-badge" }, [String(counts[section.id])]));
-    seg.appendChild(btn);
-  }
-  wrap.appendChild(seg);
-
-  const content = el("div", { className: "wv-settings-section" });
-  switch (controller.settingsSection) {
-    case "versions":
-      content.appendChild(renderVersionsTab(controller, entry));
-      break;
-    case "examples":
-      content.appendChild(renderExamplesTab(controller, entry));
-      break;
-    default:
-      content.appendChild(renderEntryMetadataForm(controller, entry));
-      break;
-  }
-  wrap.appendChild(content);
-
-  return wrap;
+// The Details form sits on a card of its own (Save/Discard pin to its footer).
+// Not the shared .wv-settings-section class: that one belongs to Vault Settings
+// and caps its width at 760px, which is what made these tabs so narrow.
+function renderDetailsCard(child) {
+  return el("div", { className: "wv-details-card" }, [child]);
 }

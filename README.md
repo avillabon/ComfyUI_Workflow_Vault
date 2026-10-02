@@ -62,9 +62,9 @@ example media already filled in. You can switch to your own folder later from
 - **Grid view** with search, status filter, Favorites and Show-archived
   toggles, sort controls (by name, created date, or last updated), and a
   **card size selector** (Small, Medium, Large, or Extra large) on the breadcrumb line.
-  Cards are exactly that width on every screen and the number per row follows
-  the window width, so a bigger screen shows more cards instead of bigger ones
-  (spare width becomes even margins at the sides).
+  Cards scale with the window: the size sets the narrowest a card gets, cards
+  stretch to fill the row, and another column appears as soon as there's room
+  for one.
 - **Adapts to your screen** — the vault window grows in steps as the screen
   gets larger (about 1400 → 1640 → 2000 → 2400 px wide) and never past 92% of
   the viewport. Pick a fixed maximum instead under **Settings → General →
@@ -86,7 +86,8 @@ example media already filled in. You can switch to your own folder later from
 - **Favorites** — star any entry from the grid card or detail view; favorites
   pin to the top in "last updated" sort order.
 - **Grid cards** show the thumbnail, entry name, status, generation type
-  badge(s), favorite toggle, and a one-click "open workflow" button. Thumbnails
+  badge(s), favorite toggle, and a one-click "open workflow" button (shown on
+  hover) that opens the workflow in ComfyUI and closes the vault. Thumbnails
   can be static images or **animated** (when made from a video) and loop
   automatically in the grid. Optional card fields (description, tags, version
   count, example count, date) are individually toggleable in settings for a
@@ -104,32 +105,36 @@ example media already filled in. You can switch to your own folder later from
 
 ### Entry detail
 
-- **Overview tab** — a read-only summary (description, tags, status,
-  generation type, and the thumbnail with **Open folder** and **Export (.zip)**
-  buttons — the latter downloads the whole entry as a zip) followed by a full
-  gallery of example media. When the entry has a compare image, the Overview
-  thumbnail itself becomes the same hover-to-wipe compare slider used on the
-  grid card. Each example supports a before/after compare slider for image
-  input/output pairs, a "reveal in folder" button per media item, and
-  per-example notes.
-- **Notes tab** — one or more Markdown notes per entry, shown as sub-tabs you
-  can add, rename, and delete. Notes render as Markdown with a toggle for
-  in-place editing.
-- **Settings tab** with three sub-tabs:
-  - **Workflow Details** — edit name, description, tags (with autocomplete),
-    status, generation type, favorite toggle, and thumbnail (image or
-    video, same as the Save wizard), plus read-only stats (created/updated
-    dates, version count, example count).
-  - **Versions** — full version history: add a new version, overwrite the
-    current one, promote a past version, and edit per-version notes.
-  - **Examples** — add, edit, delete, and reorder examples and their
-    input/output media, with live previews and drag-to-move between Inputs and
-    Outputs. Media can be dropped, browsed, or pasted (Ctrl+V / **Paste from
-    clipboard**) into either the Inputs or the Outputs zone.
-- **Entry actions** (in the Settings tab) — **Duplicate** an entry into a new
-  one (copies the thumbnail, tags, generation types, examples, and notes, plus
-  only the current version), **Archive** / restore, and **Delete** (sent to the
-  OS Recycle Bin / Trash where supported).
+Five tabs, each with a count badge where it applies:
+
+- **Overview** — a read-only summary (description, tags, status, generation
+  type, and the thumbnail with **Open folder** and **Export (.zip)** buttons —
+  the latter downloads the whole entry as a zip) followed by a full gallery of
+  example media. The Versions and Examples tiles are shortcuts to those tabs.
+  When the entry has a compare image, the Overview thumbnail itself becomes the
+  same hover-to-wipe compare slider used on the grid card. Each example supports
+  a before/after compare slider for image input/output pairs, a "reveal in
+  folder" button per media item, and per-example notes.
+- **Notes** — one or more Markdown notes per entry. **Add note** is always at
+  the top; once there are two or more, they appear as sub-tabs you can rename and
+  delete. Notes render as Markdown with a toggle for in-place
+  editing.
+- **Versions** — full version history: add a new version, overwrite the current
+  one, promote a past version, and edit per-version notes.
+- **Examples** — add, edit, delete, and reorder examples and their input/output
+  media, with live previews and drag-to-move between Inputs and Outputs. Media
+  can be dropped, browsed, or pasted (Ctrl+V / **Paste from clipboard**) into
+  either the Inputs or the Outputs zone.
+- **Details** — edit name, description, tags (with autocomplete), status,
+  generation type, favorite toggle, and thumbnail (image or video, same as the
+  Save wizard), plus read-only stats (created/updated dates, current version).
+  **Save changes** and **Discard** stay pinned to the bottom of the tab while
+  the form scrolls, and are disabled until something changes.
+- **More actions (⋯)** in the entry header, available from every tab:
+  **Duplicate** an entry into a new one (copies the thumbnail, tags, generation
+  types, examples, and notes, plus only the current version), **Archive** /
+  **Restore**, and **Delete** (sent to the OS Recycle Bin / Trash where
+  supported). Actions that would drop unsaved edits ask first.
 
 ### Save wizard
 
@@ -148,7 +153,7 @@ example media already filled in. You can switch to your own folder later from
     in the browser (no ffmpeg needed).
   The untouched original (image or video) is kept as a separate archival source
   either way, and original file dates are preserved. A × on the preview clears
-  the pick, here and in **Settings → Workflow Details**.
+  the pick, here and in the entry's **Details** tab.
 - **Paste from the clipboard** — every media box takes the clipboard as well as
   drops: the thumbnail, the compare image, and each example's Inputs / Outputs
   section. Press **Ctrl+V** with the box focused or under the cursor, or click
@@ -163,7 +168,7 @@ example media already filled in. You can switch to your own folder later from
   and behavior as the thumbnail (image or video, animated or captured still).
   When set, it becomes the "before" layer of the hover compare slider on the
   grid card and Overview preview. Its untouched original is archived too, and a
-  × clears it. Also editable later from **Settings → Workflow Details**.
+  × clears it. Also editable later from the entry's **Details** tab.
 
 ### Organization (tag-first)
 
@@ -254,6 +259,24 @@ tags, and settings (including its accent color).
 
 ### Quality of life
 
+- **Keyboard shortcuts** — press **?** (or click the ⚡ button between **New Entry**
+  and Settings) for the list. In the grid: **/** focuses search, the **arrow keys**,
+  **Home** and **End** move between workflows (**↓** from the search box jumps
+  into the results), **Enter** opens the focused workflow's details, **O** opens
+  it in ComfyUI, and **N** starts a new entry from the current canvas. With a tab
+  focused inside an entry, **←** / **→** switch tabs. Single-key shortcuts are
+  ignored while you're typing in a field.
+- **ComfyUI shortcuts stay out of the way** — while the vault is open, keystrokes
+  no longer reach ComfyUI (pressing **N** or **M** used to pop its node or model
+  library open behind the vault).
+- **Loading skeleton** — the window opens at its final shape with a shimmering
+  placeholder grid instead of a text line, and cards ease in once the vault has
+  loaded or you switch vaults (both respect "reduce motion").
+- **One consistent entry layout** — every entry tab (Overview, Notes, Versions,
+  Examples, Details) sits in the same centered page width, which grows with the
+  window. On wide windows the Overview puts the summary and the examples side by
+  side as matching panels (tops and bottoms aligned), and Versions flow into two
+  columns.
 - Version number, author credit, and link to GitHub repo in the sidebar footer.
 - Sidebar rail icons and the vault logo are tinted by the accent color.
 - Thumbnails use lazy loading for snappy grid performance at any library size.

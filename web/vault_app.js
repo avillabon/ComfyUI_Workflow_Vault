@@ -3,12 +3,13 @@
 // controller.render() and call back into controller methods for navigation.
 
 import { VaultAPI } from "./vault_api.js";
-import { el, clear, confirmDialog, saveDiscardCancelDialog, showToast, applyAccentColor } from "./vault_dom.js";
+import { el, clear, confirmDialog, saveDiscardCancelDialog, showToast, applyAccentColor, closeMenu } from "./vault_dom.js";
 import { renderLoading, renderInitView, renderTopbar, renderGridBody } from "./vault_modal.js";
-import { renderDetailView } from "./vault_detail.js";
+import { renderDetailView, openCurrentVersion } from "./vault_detail.js";
 import { renderWizard } from "./vault_wizard.js";
 import { renderGlobalSettings } from "./vault_global_settings.js";
 import { readWindowSizeHint, saveWindowSizeHint, isWindowSize } from "./vault_window_size.js";
+import { isTypingTarget, showShortcutsDialog } from "./vault_shortcuts.js";
 
 const DEFAULT_FILTERS = () => ({ search: "", status: null, favoritesOnly: false, showArchived: undefined, generationType: null, tags: [] });
 
@@ -19,7 +20,7 @@ export class VaultApp {
     this.view = "grid"; // grid | detail | wizard | settings
     this.selectedEntryId = null;
     this.selectedTab = "overview";
-    this.settingsSection = "info"; // sub-section within the Settings tab
+    this.settingsSection = "info"; // remembered tab within Vault Settings
     this.filters = DEFAULT_FILTERS();
     this.ui = {}; // transient view state that isn't a filter (e.g. tag-search query)
     this.isDirty = false;
@@ -43,13 +44,13 @@ export class VaultApp {
     }
     this.render();
     await this.loadState();
+    this.ui.animateEnter = true;
     if (options.openWizard) {
       this.wizardOptions = options.wizardOptions || {};
       this.view = "wizard";
     } else if (this.resumePlace && this.getEntry(this.resumePlace.entryId)) {
       this.selectedEntryId = this.resumePlace.entryId;
       this.selectedTab = this.resumePlace.tab;
-      this.settingsSection = this.resumePlace.settingsSection;
       this.view = "detail";
     }
     this.resumePlace = null;
@@ -62,12 +63,108 @@ export class VaultApp {
   }
 
   _onKeyDown(e) {
+    // The vault sits on top of ComfyUI, whose own single-key shortcuts (n opens
+    // the node library, m the models, w the workflows, ...) would otherwise fire
+    // behind the overlay. Listeners on this same document still run, and ComfyUI's
+    // window-level listener never sees the event.
+    e.stopPropagation();
     if (document.querySelector(".wv-overlay-dialog")) return;
     if (e.key === "Escape") {
       this.requestClose();
       return;
     }
-    if (e.key === "Tab") this._trapFocus(e);
+    if (e.key === "Tab") {
+      this._trapFocus(e);
+      return;
+    }
+    this._onShortcut(e);
+  }
+
+  // Single-key shortcuts. Never while typing, never with a modifier (those belong
+  // to the browser and to paste/copy handlers), and never while a menu is open.
+  _onShortcut(e) {
+    if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+    if (document.querySelector(".wv-menu")) return;
+    const typing = isTypingTarget(e.target);
+
+    // From the search box, Down hops into the results.
+    if (typing && e.key === "ArrowDown" && e.target.classList.contains("wv-search")) {
+      if (this._focusCard(0)) e.preventDefault();
+      return;
+    }
+    if (typing) return;
+
+    // "?" is Shift+/ — some keyboard layouts and input tools report the slash.
+    if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
+      e.preventDefault();
+      showShortcutsDialog();
+      return;
+    }
+    if (this.view !== "grid" || !this.state?.initialized) return;
+
+    switch (e.key) {
+      case "/":
+        e.preventDefault();
+        this.overlay?.querySelector(".wv-search")?.focus();
+        break;
+      case "n":
+      case "N":
+        e.preventDefault();
+        this.openWizard({ mode: "full" });
+        break;
+      case "o":
+      case "O": {
+        const entry = this.getEntry(document.activeElement?.closest?.(".wv-card")?.dataset.entryId);
+        if (entry) {
+          e.preventDefault();
+          openCurrentVersion(this, entry);
+        }
+        break;
+      }
+      case "ArrowLeft":
+      case "ArrowRight":
+      case "ArrowUp":
+      case "ArrowDown":
+      case "Home":
+      case "End":
+        if (this._moveCardFocus(e.key)) e.preventDefault();
+        break;
+    }
+  }
+
+  _cards() {
+    return [...(this.overlay?.querySelectorAll(".wv-card") || [])];
+  }
+
+  _focusCard(index) {
+    const cards = this._cards();
+    const card = cards[Math.max(0, Math.min(index, cards.length - 1))];
+    if (!card) return false;
+    card.focus();
+    card.scrollIntoView({ block: "nearest" });
+    return true;
+  }
+
+  // Arrow keys walk the grid. The column count comes from the layout itself (how
+  // many cards share the first row), so it follows the window width and card size.
+  _moveCardFocus(key) {
+    const cards = this._cards();
+    if (!cards.length) return false;
+    const current = cards.indexOf(document.activeElement?.closest?.(".wv-card"));
+    if (current < 0) return this._focusCard(0); // nothing focused yet: start at the first card
+    const columns = Math.max(1, cards.filter((c) => c.offsetTop === cards[0].offsetTop).length);
+    const target =
+      {
+        ArrowLeft: current - 1,
+        ArrowRight: current + 1,
+        ArrowUp: current - columns,
+        ArrowDown: current + columns,
+        Home: 0,
+        End: cards.length - 1,
+      }[key];
+    // Stay put at the edges rather than wrapping.
+    if (target < 0 || target >= cards.length) return true;
+    return this._focusCard(target);
   }
 
   // Keep Tab inside the overlay. Without this the tab order walks straight out
@@ -108,13 +205,14 @@ export class VaultApp {
   close({ keepPlace = false } = {}) {
     this.resumePlace =
       keepPlace && this.view === "detail" && this.selectedEntryId
-        ? { entryId: this.selectedEntryId, tab: this.selectedTab, settingsSection: this.settingsSection }
+        ? { entryId: this.selectedEntryId, tab: this.selectedTab }
         : null;
     if (this.overlay) {
       this.overlay.remove();
       this.overlay = null;
     }
     document.removeEventListener("keydown", this._onKeyDown);
+    closeMenu();
     this.view = "grid";
     this.selectedEntryId = null;
     this.selectedTab = "overview";
@@ -337,6 +435,7 @@ export class VaultApp {
     try {
       const res = await VaultAPI.activateProfile(profileId);
       this.resetForNewVault();
+      this.ui.animateEnter = true;
       await this.refresh();
       showToast(`Switched to ${res.profile?.name || "vault"}.`, "success");
     } catch (e) {
@@ -347,6 +446,7 @@ export class VaultApp {
 
   render() {
     if (!this.overlay) return;
+    closeMenu(); // a popover can't outlive the DOM it was anchored to
 
     const active = document.activeElement;
     let restoreFocus = null;

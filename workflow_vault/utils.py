@@ -36,7 +36,9 @@ def reveal_in_file_manager(path):
     try:
         if sys.platform.startswith("win"):
             # explorer needs the unusual `/select,<path>` form as one argument.
-            subprocess.Popen(f'explorer /select,"{os.path.normpath(path)}"')
+            # Passed as a list (no shell/string parsing) so the path can't
+            # break out of quoting and inject extra arguments/commands.
+            subprocess.Popen(["explorer", f"/select,{os.path.normpath(path)}"])
         elif sys.platform == "darwin":
             subprocess.Popen(["open", "-R", path])
         else:

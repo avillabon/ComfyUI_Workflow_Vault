@@ -46,14 +46,17 @@ Two **Workflow Vault** buttons appear in the left sidebar rail:
   entry, Save defaults to updating that entry.
 
 The first time you open the vault, you'll be asked to choose a folder on disk
-to use as your vault root. This folder is remembered for future sessions.
+to use as your vault root. This folder is remembered for future sessions, and
+becomes your first vault, named "Default" (see [Multiple vaults](#multiple-vaults)
+to add more, such as separate work and personal vaults).
 
 If you just want to explore the UI without setting anything up, click
 **"Use included sample vault"** on that screen — it points the vault at the
 `sample_vault/` folder bundled with this extension, which contains a few
 example entries (image, video, and audio workflows) with versions, docs, and
 example media already filled in. You can switch to your own folder later from
-**Vault Settings** (⚙).
+**Vault Settings → Vaults** (⚙), or add your own as a second vault and keep the
+sample alongside it.
 
 ## Features
 
@@ -269,6 +272,16 @@ tags, and settings (including its accent color).
 - **ComfyUI shortcuts stay out of the way** — while the vault is open, keystrokes
   no longer reach ComfyUI (pressing **N** or **M** used to pop its node or model
   library open behind the vault).
+- **Opening a workflow returns you to where you were** — every "open" action
+  (grid card, entry header, a version's **Open in Graph**) opens the workflow in a
+  new ComfyUI tab and closes the vault. Reopen it and you land back on the same
+  entry (or the grid, if that's where you started). If an entry form has unsaved
+  edits, you're asked before the vault closes.
+- **Fast on large vaults** — entries are found by an in-memory index that is
+  checked against the files on every use, and each entry's loaded state is cached
+  against a fingerprint of its files. Both re-verify against the disk, so editing
+  or moving folders by hand stays safe; they just avoid re-reading every entry for
+  every thumbnail and every click.
 - **Loading skeleton** — the window opens at its final shape with a shimmering
   placeholder grid instead of a text line, and cards ease in once the vault has
   loaded or you switch vaults (both respect "reduce motion").
@@ -388,6 +401,16 @@ Before calling a build release-ready, test it in a live ComfyUI session:
 - Export a single entry and the full vault.
 - Run **Settings → Storage → Health → Check vault** and confirm the report is
   clean for the test vault.
+- Add a second vault under **Settings → Vaults**, switch between them from the
+  sidebar, and confirm entries, tags, and accent color stay separate.
+- Try each **Window size** and **Card size**; resize the browser and confirm
+  cards fill the row and a column is added when one fits. Below about 900 px wide
+  the sidebar should collapse into a drawer opened from the filter button.
+- Click **Open** on a card and from an entry's header: the workflow opens in a new
+  tab, the vault closes, and reopening lands where you were.
+- Press **?** for the shortcuts list, then try **/**, the arrow keys, **O**, and
+  **N** — and confirm ComfyUI's own shortcuts (N, M, W) don't fire behind the
+  vault.
 
 ## Notes
 

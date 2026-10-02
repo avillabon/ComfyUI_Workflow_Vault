@@ -76,6 +76,27 @@ def _is_same_origin(request):
     return urlsplit(origin).netloc == request.host
 
 
+def _is_loopback(request):
+    """True when the request's peer is this machine itself.
+
+    The vault is built for local, single-user use and ships with no login
+    system. Restricting every route to the loopback address keeps vault data
+    from becoming reachable to other users if ComfyUI is ever bound to a
+    non-loopback interface.
+    """
+    return request.remote in ("127.0.0.1", "::1")
+
+
+def _guard_local(handler):
+    @functools.wraps(handler)
+    async def wrapped(request):
+        if not _is_loopback(request):
+            return _error("Blocked: the vault API only accepts local requests.", 403)
+        return await handler(request)
+
+    return wrapped
+
+
 def _guard_csrf(handler):
     @functools.wraps(handler)
     async def wrapped(request):
@@ -83,12 +104,21 @@ def _guard_csrf(handler):
             return _error("Blocked: this request appears to come from another site.", 403)
         return await handler(request)
 
-    return wrapped
+    return _guard_local(wrapped)
+
+
+def _get(path):
+    """Register a loopback-guarded GET route."""
+    def decorator(handler):
+        return routes.get(path)(_guard_local(handler))
+
+    return decorator
 
 
 def _post(path):
-    """Register a CSRF-guarded POST route. Mutating endpoints use this instead
-    of routes.post() so the check can never be forgotten on a new route."""
+    """Register a CSRF- and loopback-guarded POST route. Mutating endpoints use
+    this instead of routes.post() so the check can never be forgotten on a new
+    route."""
     def decorator(handler):
         return routes.post(path)(_guard_csrf(handler))
 
@@ -266,7 +296,7 @@ def _prepare_vault_root(new_root, confirm):
 # Settings / vault initialization
 # ---------------------------------------------------------------------------
 
-@routes.get("/workflow-vault/state")
+@_get("/workflow-vault/state")
 async def get_state(request):
     vault_root = config.get_vault_root()
     if not vault_root or not config.is_initialized(vault_root):
@@ -283,7 +313,7 @@ async def get_state(request):
     return web.json_response(_full_state(vault_root))
 
 
-@routes.get("/workflow-vault/settings")
+@_get("/workflow-vault/settings")
 async def get_settings(request):
     vault_root = config.get_vault_root()
     initialized = bool(vault_root and config.is_initialized(vault_root))
@@ -414,7 +444,7 @@ def _profiles_response(**extra):
     return web.json_response({**_profile_fields(), **extra})
 
 
-@routes.get("/workflow-vault/profiles")
+@_get("/workflow-vault/profiles")
 async def get_profiles(request):
     return _profiles_response()
 
@@ -633,7 +663,7 @@ async def _stream_zip_response(request, zip_path, filename):
             pass
 
 
-@routes.get("/workflow-vault/entries/{entry_id}/export")
+@_get("/workflow-vault/entries/{entry_id}/export")
 async def get_export_entry(request):
     vault_root, err = _require_vault()
     if err:
@@ -648,7 +678,7 @@ async def get_export_entry(request):
     return await _stream_zip_response(request, zip_path, f"{exporting.download_name(slug, 'entry')}.zip")
 
 
-@routes.get("/workflow-vault/footprint")
+@_get("/workflow-vault/footprint")
 async def get_footprint(request):
     vault_root, err = _require_vault()
     if err:
@@ -660,7 +690,7 @@ async def get_footprint(request):
     return web.json_response(data)
 
 
-@routes.get("/workflow-vault/health")
+@_get("/workflow-vault/health")
 async def get_health(request):
     vault_root, err = _require_vault()
     if err:
@@ -680,7 +710,7 @@ async def post_cleanup_staging(request):
     return web.json_response({"ok": not data["failed"], **data, "health": report})
 
 
-@routes.get("/workflow-vault/export")
+@_get("/workflow-vault/export")
 async def get_export_vault(request):
     vault_root, err = _require_vault()
     if err:
@@ -932,7 +962,7 @@ async def post_delete_version(request):
         return web.json_response(storage.build_entry_state(vault_root, slug))
 
 
-@routes.get("/workflow-vault/entries/{entry_id}/versions/{version_id}/workflow")
+@_get("/workflow-vault/entries/{entry_id}/versions/{version_id}/workflow")
 async def get_version_workflow(request):
     vault_root, err = _require_vault()
     if err:
@@ -1189,7 +1219,7 @@ async def post_convert_folders_to_tags(request):
 # Media
 # ---------------------------------------------------------------------------
 
-@routes.get("/workflow-vault/media")
+@_get("/workflow-vault/media")
 async def get_media(request):
     vault_root = config.get_vault_root()
     if not vault_root or not config.is_initialized(vault_root):

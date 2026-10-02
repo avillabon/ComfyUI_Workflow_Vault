@@ -3,6 +3,7 @@
 
 import { el, showToast, confirmDialog, promptDialog, applyAccentColor, formatBytes } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
+import { renderProfilesSection, activeProfile } from "./vault_profiles.js";
 
 // Optional grid-card fields the user can hide for a more minimal look.
 const CARD_FIELD_DEFS = [
@@ -127,6 +128,7 @@ export function renderGlobalSettings(controller) {
     { id: "general", label: "General" },
     { id: "organize", label: "Organization" },
     { id: "storage", label: "Storage" },
+    { id: "profiles", label: "Vaults" },
   ];
   const sections = {
     general: el("div", { className: "wv-settings-section" }),
@@ -134,6 +136,7 @@ export function renderGlobalSettings(controller) {
     // Organization holds the Tags panel (plus a one-time legacy folder→tag
     // conversion when an older vault still carries folder assignments).
     organize: el("div", { className: "wv-settings-section wv-settings-section-wide" }),
+    profiles: el("div", { className: "wv-settings-section wv-settings-section-wide" }),
   };
   const tabBar = el("div", { className: "wv-tab-bar" });
   const tabButtons = {};
@@ -233,10 +236,20 @@ export function renderGlobalSettings(controller) {
     }
   }
 
-  const locPanel = panel("Vault location", "pi pi-folder", "Where entries and media are stored on disk.");
+  // Location and accent color belong to the active vault, so they live in the
+  // Vaults tab (collected in activePanels and handed to it at the bottom).
+  const activeName = activeProfile(state)?.name;
+  const activePanels = [];
+  const locPanel = panel(
+    activeName ? "Active vault: folder" : "Vault folder",
+    "pi pi-folder",
+    activeName
+      ? `Where “${activeName}” keeps its entries and media on disk. Re-pointing it here changes this vault's folder; to keep a separate vault, add another one below.`
+      : "Where entries and media are stored on disk."
+  );
   locPanel.appendChild(el("div", { className: "wv-vs-location-row" }, [locationInput, locationBrowseBtn, changeBtn]));
   locPanel.appendChild(locationStatus);
-  sections.general.appendChild(locPanel);
+  activePanels.push(locPanel);
 
   // --- Defaults ---
   const showArchivedSwitch = switchEl(!!state.settings?.show_archived);
@@ -280,9 +293,15 @@ export function renderGlobalSettings(controller) {
   function syncAccent() {
     applyAccentColor(selectedAccent); // live preview; persisted on Save
     colorInput.value = selectedAccent;
+    let presetMatch = false;
     for (const sw of swatchRow.children) {
-      sw.classList.toggle("wv-swatch-active", (sw.dataset.color || "").toLowerCase() === selectedAccent.toLowerCase());
+      const match = (sw.dataset.color || "").toLowerCase() === selectedAccent.toLowerCase();
+      presetMatch = presetMatch || match;
+      sw.classList.toggle("wv-swatch-active", match);
+      sw.setAttribute("aria-pressed", String(match));
     }
+    // A color outside the presets means the custom picker is the selection.
+    colorInput.classList.toggle("wv-swatch-active", !presetMatch);
   }
 
   for (const c of PRESET_ACCENTS) {
@@ -307,11 +326,17 @@ export function renderGlobalSettings(controller) {
     markDirty();
   });
 
-  const accentPanel = panel("Appearance", "pi pi-palette", "Accent color used for icons, the logo, and highlights throughout the vault.");
+  const accentPanel = panel(
+    "Active vault: accent color",
+    "pi pi-palette",
+    activeName
+      ? `Used for icons, the logo, and highlights. Each vault keeps its own, so “${activeName}” is easy to tell apart. Saved with Save settings.`
+      : "Accent color used for icons, the logo, and highlights throughout the vault."
+  );
   accentPanel.appendChild(
     settingRow("Accent color", el("div", { className: "wv-accent-controls" }, [swatchRow, colorInput]))
   );
-  sections.general.appendChild(accentPanel);
+  activePanels.push(accentPanel);
   syncAccent();
 
   // --- Storage (example image compression) ---
@@ -588,6 +613,8 @@ export function renderGlobalSettings(controller) {
   body.appendChild(sections.general);
   body.appendChild(sections.organize);
   body.appendChild(sections.storage);
+  sections.profiles.appendChild(renderProfilesSection(controller, { activePanels }));
+  body.appendChild(sections.profiles);
   showTab(SETTINGS_TABS.some((t) => t.id === controller.settingsSection) ? controller.settingsSection : "general");
 
   wrap.appendChild(body);

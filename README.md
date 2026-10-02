@@ -86,8 +86,9 @@ example media already filled in. You can switch to your own folder later from
   the thumbnail (image *or* video, animated or a captured still). Entries
   without one fall back to the normal hover-zoom thumbnail.
 - **Accent color** — a single color tints all icons and the logo throughout the
-  UI. Choose from preset swatches or a custom color picker; changes preview
-  live before saving.
+  UI. Choose from preset swatches or a custom color picker under
+  **Settings → Vaults**; changes preview live before saving. Each vault keeps its
+  own accent.
 
 ### Entry detail
 
@@ -187,15 +188,13 @@ example media already filled in. You can switch to your own folder later from
 
 ### Global vault settings
 
-Vault Settings (⚙) is organized into three tabs:
+Vault Settings (⚙) is organized into four tabs:
 
 - **General**
-  - **Vault location** — change or re-point the vault root folder at any time.
   - **Defaults** — show archived entries by default, and the placeholder-vs-blank
     behavior when an entry has no thumbnail.
   - **Card display** — toggle individual grid-card fields (Description, Tags,
     Version count, Example count, Date) on or off for a minimal look.
-  - **Appearance** — accent color (preset swatches + custom picker, live preview).
 - **Organization**
   - **Tags** — rename, merge (rename to an existing tag), or delete tags across
     all entries.
@@ -215,6 +214,29 @@ Vault Settings (⚙) is organized into three tabs:
     and missing referenced media/workflows. The same panel can clean
     `.wv_staging_*` interrupted-save folders by moving them to the OS
     Trash/Recycle Bin where supported.
+- **Vaults** — add, rename, switch, and remove vaults, and set the active
+  vault's folder and accent color (see Multiple vaults below).
+
+### Multiple vaults
+
+Keep separate vaults — say **Work** and **Personal** — and switch between them
+without leaving ComfyUI. Each vault is its own folder with its own entries,
+tags, and settings (including its accent color).
+
+- **Switch** from the **Vault** dropdown at the top of the sidebar. Filters and
+  any open entry reset so nothing from one vault leaks into another.
+- **Add, rename, and remove** vaults in **Settings → Vaults**. Adding takes a
+  name plus a folder: an empty one starts a fresh vault, an existing vault
+  folder is reused as-is. The active vault's folder and accent color are edited
+  on the same tab.
+- **Removing a vault only forgets it** — the folder and everything in it stay on
+  disk, and you can add it back later. The active vault can't be removed.
+- When you have more than one vault, the save wizard shows which one it is
+  saving into.
+- Existing installs upgrade automatically: your current vault is listed as
+  "Default" (rename it any time). Nothing is moved or copied.
+- If a vault's folder has gone missing (an unplugged drive, a moved install),
+  switching to it reports that instead of silently creating an empty one.
 
 ### Quality of life
 
@@ -260,9 +282,9 @@ Vault Settings (⚙) is organized into three tabs:
   does not delete complete entries.
 - Before running batch compression or large cleanup work, make a vault export or
   copy the vault folder.
-- The selected vault location is stored beside the extension in
-  `vault_config.json`, not inside the vault. Moving a ComfyUI install may require
-  pointing Workflow Vault at the vault folder again.
+- The selected vault location and your list of vaults are stored beside the
+  extension in `vault_config.json`, not inside the vault. Moving a ComfyUI
+  install may require pointing Workflow Vault at the vault folder again.
 
 ## Troubleshooting
 

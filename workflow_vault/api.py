@@ -214,6 +214,13 @@ def _collect_indexed_files(files, prefix, labels=None):
     return result
 
 
+def _profile_fields():
+    """Profile list + active id, merged into every state/settings response so the
+    UI never needs a second request to show the profile switcher."""
+    info = config.list_profiles()
+    return {"profiles": info["profiles"], "active_profile": info["active"]}
+
+
 def _full_state(vault_root):
     state = storage.build_state(vault_root)
     state["vault_root"] = vault_root
@@ -221,7 +228,38 @@ def _full_state(vault_root):
     state["settings"] = config.load_vault_settings(vault_root)
     state["pillow_available"] = media.pillow_available()
     state["trash_label"] = utils.trash_label()
+    state.update(_profile_fields())
     return state
+
+
+def _prepare_vault_root(new_root, confirm):
+    """Validate a folder the user wants to use as a vault root and initialize it
+    if needed. Returns an error response, or None once it is ready to use.
+
+    A non-empty folder that isn't already a vault needs explicit confirmation
+    (409 + needs_confirmation) before vault files are created inside it."""
+    ok, err = config.validate_vault_root(new_root)
+    if not ok:
+        return _error(err)
+
+    if config.is_empty(new_root) or not os.path.exists(new_root):
+        config.initialize_vault(new_root)
+    elif not config.is_initialized(new_root):
+        if not confirm:
+            return web.json_response({
+                "needs_confirmation": True,
+                "message": (
+                    "This folder does not appear to be a Workflow Vault.\n\n"
+                    "Vault files will be created inside it:\n"
+                    "  vault_settings.json\n"
+                    "  folders.json\n"
+                    "  entries/\n\n"
+                    "Existing files will not be modified.\n\n"
+                    "Continue?"
+                ),
+            }, status=409)
+        config.initialize_vault(new_root)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +278,7 @@ async def get_state(request):
             "entries": [],
             "tags": [],
             "extension_dir": config.EXTENSION_DIR,
+            **_profile_fields(),
         })
     return web.json_response(_full_state(vault_root))
 
@@ -253,6 +292,7 @@ async def get_settings(request):
         "vault_root": vault_root,
         "initialized": initialized,
         "settings": settings,
+        **_profile_fields(),
     })
 
 
@@ -274,27 +314,9 @@ def _apply_settings(body):
 
     if "vault_root" in body:
         new_root = (body.get("vault_root") or "").strip()
-        ok, err = config.validate_vault_root(new_root)
-        if not ok:
-            return _error(err)
-
-        if config.is_empty(new_root) or not os.path.exists(new_root):
-            config.initialize_vault(new_root)
-        elif not config.is_initialized(new_root):
-            if not body.get("confirm"):
-                return web.json_response({
-                    "needs_confirmation": True,
-                    "message": (
-                        "This folder does not appear to be a Workflow Vault.\n\n"
-                        "Vault files will be created inside it:\n"
-                        "  vault_settings.json\n"
-                        "  folders.json\n"
-                        "  entries/\n\n"
-                        "Existing files will not be modified.\n\n"
-                        "Continue?"
-                    ),
-                }, status=409)
-            config.initialize_vault(new_root)
+        err_response = _prepare_vault_root(new_root, body.get("confirm"))
+        if err_response:
+            return err_response
 
         config.set_vault_root(new_root)
         vault_root = new_root
@@ -347,6 +369,7 @@ def _apply_settings(body):
         "vault_root": vault_root,
         "initialized": True,
         "settings": config.load_vault_settings(vault_root),
+        **_profile_fields(),
     })
 
 
@@ -366,7 +389,78 @@ async def post_initialize(request):
             "vault_root": vault_root,
             "initialized": True,
             "settings": config.load_vault_settings(vault_root),
+            **_profile_fields(),
         })
+
+
+# ---------------------------------------------------------------------------
+# Profiles
+# ---------------------------------------------------------------------------
+#
+# Each profile is its own vault root. Switching only repoints vault_config.json
+# at another root; no vault data is copied, moved, or deleted by any of these
+# routes. All of them serialize on the extension-level lock because they
+# read-modify-write vault_config.json.
+
+def _profiles_response(**extra):
+    return web.json_response({**_profile_fields(), **extra})
+
+
+@routes.get("/workflow-vault/profiles")
+async def get_profiles(request):
+    return _profiles_response()
+
+
+@_post("/workflow-vault/profiles")
+async def post_create_profile(request):
+    """Create a profile backed by a vault folder and (by default) switch to it."""
+    body, err = await _read_json(request)
+    if err:
+        return err
+    name = config.clean_profile_name(body.get("name"))
+    vault_root = (body.get("vault_root") or "").strip()
+    if not vault_root:
+        return _error("Choose a folder for the vault.")
+    async with _write_lock(None):
+        problem = config.validate_new_profile(name, vault_root)
+        if problem:
+            return _error(problem)
+        err_response = _prepare_vault_root(vault_root, body.get("confirm"))
+        if err_response:
+            return err_response
+        profile = config.create_profile(name, vault_root, activate=body.get("activate", True) is not False)
+        return _profiles_response(profile=profile)
+
+
+@_post("/workflow-vault/profiles/{profile_id}/activate")
+async def post_activate_profile(request):
+    async with _write_lock(None):
+        profile, err_msg = config.activate_profile(request.match_info["profile_id"])
+        if err_msg:
+            return _error(err_msg, 404 if err_msg == config.PROFILE_NOT_FOUND else 400)
+        return _profiles_response(profile=profile)
+
+
+@_post("/workflow-vault/profiles/{profile_id}/rename")
+async def post_rename_profile(request):
+    body, err = await _read_json(request)
+    if err:
+        return err
+    async with _write_lock(None):
+        profile, err_msg = config.rename_profile(request.match_info["profile_id"], body.get("name"))
+        if err_msg:
+            return _error(err_msg, 404 if err_msg == config.PROFILE_NOT_FOUND else 400)
+        return _profiles_response(profile=profile)
+
+
+@_post("/workflow-vault/profiles/{profile_id}/delete")
+async def post_delete_profile(request):
+    """Remove a profile from the list. The folder and its contents stay on disk."""
+    async with _write_lock(None):
+        err_msg = config.remove_profile(request.match_info["profile_id"])
+        if err_msg:
+            return _error(err_msg, 404 if err_msg == config.PROFILE_NOT_FOUND else 400)
+        return _profiles_response()
 
 
 # ---------------------------------------------------------------------------

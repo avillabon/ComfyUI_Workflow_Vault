@@ -6,9 +6,10 @@ import { VaultAPI } from "./vault_api.js";
 import { openCurrentVersion } from "./vault_detail.js";
 import { buildCompareSlider } from "./vault_compare_slider.js";
 import { tagCountsFrom } from "./vault_tag_input.js";
+import { renderProfileSwitcher } from "./vault_profiles.js";
 
 // App version (SemVer). Keep in sync with pyproject.toml; shown in the footer.
-export const VAULT_VERSION = "1.6.1";
+export const VAULT_VERSION = "1.7.0";
 export const AUTHOR_NAME = "Alex Villabón";
 export const AUTHOR_URL = "https://www.youtube.com/@alexvillabon";
 export const REPO_URL = "https://github.com/avillabon/ComfyUI_Workflow_Vault";
@@ -81,7 +82,8 @@ export function renderInitView(controller) {
   wrap.appendChild(
     el("p", {}, [
       "Choose a folder on disk where your saved workflows, versions, examples, and notes will live. ",
-      "This folder will be used every time you open the vault.",
+      "This folder will be used every time you open the vault. ",
+      "You can add more vaults later (say, one for work and one for personal) under Settings → Vaults.",
     ])
   );
 
@@ -312,6 +314,7 @@ export function renderGridBody(controller) {
   const body = el("div", { className: "wv-body" });
 
   const sidebar = el("div", { className: "wv-sidebar" });
+  sidebar.appendChild(renderProfileSwitcher(controller));
   renderGenerationTypeFilter(sidebar, controller);
   renderTagFilter(sidebar, controller);
   sidebar.appendChild(renderSidebarFooter());

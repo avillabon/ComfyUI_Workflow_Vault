@@ -3319,35 +3319,71 @@
   gap: 6px;
 }
 
-.wv-swatch {
-  width: 22px;
-  height: 22px;
-  min-width: 22px;
-  max-width: 22px;
+.wv-swatch,
+.wv-color-input {
+  position: relative;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  max-width: 24px;
   padding: 0;
+  border: none;
   border-radius: 50%;
-  border: 2px solid transparent;
-  box-shadow: 0 0 0 1px var(--wv-border);
   cursor: pointer;
-  transition: transform 0.1s ease;
+  transition: transform 0.1s ease, box-shadow 0.12s ease;
 }
 
-.wv-swatch:hover {
+.wv-swatch:hover,
+.wv-color-input:hover {
   transform: scale(1.12);
 }
 
+/* Selected: a ring set off from the dot by a gap in the panel color, plus a
+   check mark — readable on every swatch, unlike a thin same-color outline. */
 .wv-swatch-active {
-  border-color: var(--wv-fg);
+  box-shadow: 0 0 0 2px var(--wv-surface), 0 0 0 4px var(--wv-fg);
 }
 
+.wv-swatch-active:not(.wv-color-input)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* The check is drawn symmetrically around the viewBox center (12,12), so
+     centering the image centers the mark. */
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 12.5l4 4 8-9'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.6));
+}
+
+/* Custom picker: a round swatch. Unselected it reads as a rainbow "pick your
+   own" dot; once a non-preset color is chosen it shows that color. */
 .wv-color-input {
-  width: 34px;
-  height: 26px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: conic-gradient(#ef4444, #f59e0b, #22c55e, #14b8a6, #4d9fff, #a855f7, #ec4899, #ef4444);
+}
+
+.wv-color-input::-webkit-color-swatch-wrapper {
   padding: 0;
-  border: 1px solid var(--wv-border);
-  border-radius: var(--wv-radius);
-  background: transparent;
-  cursor: pointer;
+}
+
+.wv-color-input::-webkit-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
+.wv-color-input::-moz-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
+.wv-color-input:not(.wv-swatch-active)::-webkit-color-swatch {
+  opacity: 0;
+}
+
+.wv-color-input:not(.wv-swatch-active)::-moz-color-swatch {
+  opacity: 0;
 }
 
 /* Storage: example-compression format radios + batch action */
@@ -3896,4 +3932,110 @@
   .wv-health-stats {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Profiles: sidebar switcher + Settings -> Profiles tab
+   ------------------------------------------------------------------------ */
+
+.wv-profile-switcher {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--wv-border);
+}
+
+.wv-profile-switcher .wv-sidebar-heading-row {
+  margin-bottom: 6px;
+}
+
+.wv-profile-select {
+  width: 100%;
+  box-sizing: border-box;
+  font-weight: 600;
+}
+
+.wv-detail-subtitle {
+  font-size: 12px;
+  color: var(--wv-muted);
+  padding: 2px 10px;
+  border: 1px solid var(--wv-border);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.wv-profiles {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 720px;
+}
+
+.wv-profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wv-profile-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--wv-border);
+  border-radius: var(--wv-radius);
+}
+
+.wv-profile-row-active {
+  border-color: var(--wv-accent);
+  background: var(--wv-accent-soft);
+}
+
+.wv-profile-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.wv-profile-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.wv-profile-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--wv-accent-fg);
+  background: var(--wv-accent);
+}
+
+.wv-profile-path {
+  margin-top: 2px;
+  color: var(--wv-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wv-profile-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.wv-profile-add-name {
+  margin-bottom: 8px;
+}
+
+.wv-profile-add-name .wv-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.wv-profile-add-actions {
+  margin-top: 10px;
 }

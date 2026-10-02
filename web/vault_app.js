@@ -9,6 +9,8 @@ import { renderDetailView } from "./vault_detail.js";
 import { renderWizard } from "./vault_wizard.js";
 import { renderGlobalSettings } from "./vault_global_settings.js";
 
+const DEFAULT_FILTERS = () => ({ search: "", status: null, favoritesOnly: false, showArchived: undefined, generationType: null, tags: [] });
+
 export class VaultApp {
   constructor() {
     this.overlay = null;
@@ -17,7 +19,7 @@ export class VaultApp {
     this.selectedEntryId = null;
     this.selectedTab = "overview";
     this.settingsSection = "info"; // sub-section within the Settings tab
-    this.filters = { search: "", status: null, favoritesOnly: false, showArchived: undefined, generationType: null, tags: [] };
+    this.filters = DEFAULT_FILTERS();
     this.ui = {}; // transient view state that isn't a filter (e.g. tag-search query)
     this.isDirty = false;
     this.dirtySaveHandler = null;
@@ -252,11 +254,43 @@ export class VaultApp {
     this.render();
   }
 
-  async openSettings() {
+  async openSettings(section) {
     const proceed = await this.checkDirty();
     if (!proceed) return;
+    if (section) this.settingsSection = section;
     this.view = "settings";
     this.render();
+  }
+
+  // Drop everything tied to the vault that was showing (filters, selected entry,
+  // a half-built wizard) so nothing from one vault leaks into another. The
+  // caller reloads state afterwards; showArchived is re-read from that
+  // vault's own settings.
+  resetForNewVault() {
+    this.filters = DEFAULT_FILTERS();
+    this.ui = {};
+    this.selectedEntryId = null;
+    this.selectedTab = "overview";
+    this.wizardOptions = null;
+    if (this.view !== "settings") this.view = "grid";
+  }
+
+  async switchProfile(profileId) {
+    if (!profileId || profileId === this.state?.active_profile) return;
+    const proceed = await this.checkDirty();
+    if (!proceed) {
+      this.render(); // put the switcher back on the vault that is still active
+      return;
+    }
+    try {
+      const res = await VaultAPI.activateProfile(profileId);
+      this.resetForNewVault();
+      await this.refresh();
+      showToast(`Switched to ${res.profile?.name || "vault"}.`, "success");
+    } catch (e) {
+      showToast(e.message, "error");
+      this.render();
+    }
   }
 
   render() {

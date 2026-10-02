@@ -91,6 +91,15 @@ export const VaultAPI = {
   compressExamples: () => postJSON("/workflow-vault/compress-examples", {}),
   initialize: (vaultRoot) => postJSON("/workflow-vault/initialize", { vault_root: vaultRoot }),
 
+  getProfiles: () => getJSON("/workflow-vault/profiles"),
+  createProfile: (body) => postJSON("/workflow-vault/profiles", body),
+  activateProfile: (profileId) =>
+    postJSON(`/workflow-vault/profiles/${encodeURIComponent(profileId)}/activate`, {}),
+  renameProfile: (profileId, name) =>
+    postJSON(`/workflow-vault/profiles/${encodeURIComponent(profileId)}/rename`, { name }),
+  deleteProfile: (profileId) =>
+    postJSON(`/workflow-vault/profiles/${encodeURIComponent(profileId)}/delete`, {}),
+
   createEntry: (formData, options) => postForm("/workflow-vault/entries", formData, options),
   updateEntryMetadata: (entryId, formData, options) =>
     postForm(`/workflow-vault/entries/${encodeURIComponent(entryId)}/metadata`, formData, options),

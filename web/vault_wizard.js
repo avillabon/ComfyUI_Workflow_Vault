@@ -9,6 +9,7 @@ import { renderThumbnailField } from "./vault_thumbnail_input.js";
 import { renderMediaPicker, convertFlaggedMedia } from "./vault_media_picker.js";
 import { renderNotesEditor } from "./vault_notes_editor.js";
 import { getCurrentWorkflowJSON, getWorkflowVaultOrigin, getCurrentWorkflowName } from "./vault_workflow.js";
+import { activeProfile } from "./vault_profiles.js";
 
 export function renderWizard(controller) {
   const wrap = el("div", { className: "wv-wizard" });
@@ -17,7 +18,14 @@ export function renderWizard(controller) {
   header.appendChild(
     el("button", { className: "wv-icon-btn wv-icon-btn-lg", title: "Back to vault", "aria-label": "Back to vault", onclick: () => controller.setView("grid") }, [el("i", { className: "pi pi-arrow-left" })])
   );
-  header.appendChild(el("div", { className: "wv-detail-title-area" }, [el("div", { className: "wv-detail-title" }, ["Save Current Workflow"])]));
+  // With more than one vault, say which one this save will land in.
+  const savingTo = (controller.state.profiles || []).length > 1 ? activeProfile(controller.state) : null;
+  header.appendChild(
+    el("div", { className: "wv-detail-title-area" }, [
+      el("div", { className: "wv-detail-title" }, ["Save Current Workflow"]),
+      ...(savingTo ? [el("div", { className: "wv-detail-subtitle" }, [`Saving to vault: ${savingTo.name}`])] : []),
+    ])
+  );
   header.appendChild(el("div", { className: "wv-topbar-spacer" }));
   header.appendChild(el("button", { className: "wv-icon-btn wv-icon-btn-lg", title: "Close", "aria-label": "Close", onclick: () => controller.requestClose() }, [el("i", { className: "pi pi-times" })]));
   wrap.appendChild(header);

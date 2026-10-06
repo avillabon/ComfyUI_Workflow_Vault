@@ -13,6 +13,11 @@ export function el(tag, props = {}, children = []) {
     else if (key === "style" && typeof value === "object") Object.assign(node.style, value);
     else if (key.startsWith("on") && typeof value === "function") {
       node.addEventListener(key.slice(2).toLowerCase(), value);
+    } else if (key === "muted") {
+      // On a script-created <video>/<audio> the attribute alone does NOT mute
+      // playback (it only sets defaultMuted); the property must be set too.
+      node.muted = true;
+      node.setAttribute(key, "");
     } else if (value === true) node.setAttribute(key, "");
     else node.setAttribute(key, value);
   }

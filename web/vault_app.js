@@ -256,7 +256,9 @@ export class VaultApp {
       this.selectedEntryId = null;
       this.view = "grid";
     }
-    this.render();
+    // A refresh re-reads data in place (an upload finished, a file was renamed…),
+    // so the user should stay where they were rather than jump back to the top.
+    this.render({ keepScroll: true });
   }
 
   getEntry(entryId) {
@@ -444,9 +446,45 @@ export class VaultApp {
     }
   }
 
-  render() {
+  // The scrolling regions inside the modal. render() rebuilds them from scratch,
+  // so without help each one snaps back to the top.
+  static SCROLL_REGIONS = [".wv-tab-content", ".wv-main"];
+
+  // Record where each scroll region is, tagged with the screen it belongs to so
+  // it's only restored onto that same screen (not after switching tabs/entries).
+  captureScroll() {
+    const key = `${this.view}|${this.selectedEntryId}|${this.selectedTab}`;
+    const offsets = {};
+    for (const sel of VaultApp.SCROLL_REGIONS) {
+      const node = this.overlay.querySelector(sel);
+      if (node && node.scrollTop > 0) offsets[sel] = node.scrollTop;
+    }
+    return { key, offsets };
+  }
+
+  restoreScroll(saved) {
+    if (!saved || saved.key !== `${this.view}|${this.selectedEntryId}|${this.selectedTab}`) return;
+    for (const [sel, top] of Object.entries(saved.offsets)) {
+      const node = this.overlay.querySelector(sel);
+      if (!node) continue;
+      node.scrollTop = top;
+      // Media (video players, images) may not have their height yet, which
+      // clamps the first attempt. Try once more after layout, but only if the
+      // user hasn't scrolled in the meantime.
+      const landed = node.scrollTop;
+      if (landed !== top) {
+        requestAnimationFrame(() => {
+          if (node.scrollTop === landed) node.scrollTop = top;
+        });
+      }
+    }
+  }
+
+  render({ keepScroll = false } = {}) {
     if (!this.overlay) return;
     closeMenu(); // a popover can't outlive the DOM it was anchored to
+
+    const savedScroll = keepScroll ? this.captureScroll() : null;
 
     const active = document.activeElement;
     let restoreFocus = null;
@@ -482,6 +520,7 @@ export class VaultApp {
     }
 
     this.overlay.appendChild(modal);
+    this.restoreScroll(savedScroll);
 
     if (restoreFocus) {
       const input = this.overlay.querySelector(".wv-search");

@@ -29,6 +29,29 @@ function isVideoFile(file) {
   return file && VIDEO_EXTS.includes(extOf(file.name));
 }
 
+// The backend only converts the first N seconds of a video into the animated
+// thumbnail (MAX_SECONDS in workflow_vault/video.py — keep these in sync), so
+// the preview must loop that same window instead of the whole file.
+const THUMB_MAX_SECONDS = 5;
+
+// Make a looping <video> wrap back to 0 at THUMB_MAX_SECONDS, matching what will
+// actually be saved. Clips shorter than the cap still loop naturally via `loop`.
+function limitLoopToSavedLength(video) {
+  const wrap = () => {
+    if (video.currentTime >= THUMB_MAX_SECONDS) video.currentTime = 0;
+  };
+  if (typeof video.requestVideoFrameCallback === "function") {
+    // Frame-accurate: fires per presented frame, so there's no visible overshoot.
+    const tick = () => {
+      wrap();
+      video.requestVideoFrameCallback(tick);
+    };
+    video.requestVideoFrameCallback(tick);
+  } else {
+    video.addEventListener("timeupdate", wrap); // ~4 Hz fallback
+  }
+}
+
 // A drag-and-drop image/video picker with an animated-vs-pick-a-frame fork for
 // videos. Used for both the entry thumbnail and the before/after compare
 // overlay — they share identical behavior. Options:
@@ -134,9 +157,12 @@ export function renderThumbnailField({ currentUrl = null, clearable = false, nou
     busy = false;
     clear(zone);
     zone.classList.add("wv-thumb-has-image");
-    zone.appendChild(
-      videoEl({ src, className: "wv-thumb-img", autoplay: true, muted: true, loop: true, playsinline: true }, { compact: true })
+    const video = videoEl(
+      { src, className: "wv-thumb-img", autoplay: true, muted: true, loop: true, playsinline: true },
+      { compact: true }
     );
+    limitLoopToSavedLength(video);
+    zone.appendChild(video);
     zone.appendChild(el("div", { className: "wv-thumb-change" }, ["Change"]));
     maybeAddClear();
   }

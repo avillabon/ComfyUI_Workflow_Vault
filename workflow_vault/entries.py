@@ -386,7 +386,7 @@ def delete_entry(vault_root, slug):
 def duplicate_entry(vault_root, source_slug, new_name):
     """Clone an entry into a brand-new entry under new_name: same description,
     tags, status, generation types, favorite, folder, thumbnail, examples, and
-    notes — but carrying ONLY the source's current version (a fresh single-
+    notes and files — but carrying ONLY the source's current version (a fresh single-
     version history), never the full version history.
     Returns (entry_state, error)."""
     new_name = (new_name or "").strip()

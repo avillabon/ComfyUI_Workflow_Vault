@@ -5,12 +5,12 @@ import functools
 import json
 import os
 import re
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from aiohttp import web
 from server import PromptServer
 
-from . import config, entries, examples, exporting, folders, media, storage, utils, versions, video
+from . import attachments, config, entries, examples, exporting, folders, media, storage, utils, versions, video
 
 routes = PromptServer.instance.routes
 
@@ -315,7 +315,7 @@ def _apply_settings(body):
     if "vault_root" in body:
         new_root = (body.get("vault_root") or "").strip()
         err_response = _prepare_vault_root(new_root, body.get("confirm"))
-        if err_response:
+        if err_response is not None:
             return err_response
 
         config.set_vault_root(new_root)
@@ -434,7 +434,7 @@ async def post_create_profile(request):
         if problem:
             return _error(problem)
         err_response = _prepare_vault_root(vault_root, body.get("confirm"))
-        if err_response:
+        if err_response is not None:
             return err_response
         profile = config.create_profile(name, vault_root, activate=body.get("activate", True) is not False)
         return _profiles_response(profile=profile)
@@ -608,6 +608,91 @@ async def post_delete_entry(request):
         if err_msg:
             return _error(err_msg)
         return web.json_response({"ok": True, "method": method})
+
+
+@_post("/workflow-vault/entries/{entry_id}/attachments")
+async def post_attachment(request):
+    vault_root, err = _require_vault()
+    if err:
+        return err
+    async with _write_lock(vault_root):
+        slug, _manifest, err = _require_entry(vault_root, request.match_info["entry_id"])
+        if err:
+            return err
+        try:
+            reader = await request.multipart()
+            part = await reader.next()
+            if part is None or part.name != "file" or not part.filename:
+                return _error("Choose a file to attach.")
+            await attachments.save_upload(vault_root, slug, part)
+        except ValueError as exc:
+            return _error(str(exc))
+        except Exception as exc:
+            return _error(f"Could not save attachment: {exc}", 500)
+        return web.json_response(storage.build_entry_state(vault_root, slug))
+
+
+@routes.get("/workflow-vault/entries/{entry_id}/attachments/{attachment_id}/download")
+async def get_attachment(request):
+    vault_root, err = _require_vault()
+    if err:
+        return err
+    slug, _manifest, err = _require_entry(vault_root, request.match_info["entry_id"])
+    if err:
+        return err
+    try:
+        record, path = attachments.find(vault_root, slug, request.match_info["attachment_id"])
+    except ValueError:
+        return _error("Invalid attachment.", 404)
+    if record is None or not os.path.isfile(path):
+        return _error("Attachment file is missing.", 404)
+    name = record["name"]
+    fallback = exporting.download_name(name, "attachment")
+    headers = {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(name)}",
+        "X-Content-Type-Options": "nosniff",
+    }
+    return web.FileResponse(path, headers=headers)
+
+
+@_post("/workflow-vault/entries/{entry_id}/attachments/{attachment_id}/note")
+async def post_attachment_note(request):
+    vault_root, err = _require_vault()
+    if err:
+        return err
+    body, err = await _read_json(request)
+    if err:
+        return err
+    async with _write_lock(vault_root):
+        slug, _manifest, err = _require_entry(vault_root, request.match_info["entry_id"])
+        if err:
+            return err
+        try:
+            found = attachments.update_note(vault_root, slug, request.match_info["attachment_id"], body.get("note"))
+        except ValueError as exc:
+            return _error(str(exc))
+        if not found:
+            return _error("Attachment not found.", 404)
+        return web.json_response(storage.build_entry_state(vault_root, slug))
+
+
+@_post("/workflow-vault/entries/{entry_id}/attachments/{attachment_id}/delete")
+async def post_delete_attachment(request):
+    vault_root, err = _require_vault()
+    if err:
+        return err
+    async with _write_lock(vault_root):
+        slug, _manifest, err = _require_entry(vault_root, request.match_info["entry_id"])
+        if err:
+            return err
+        try:
+            removed = await asyncio.to_thread(attachments.remove, vault_root, slug, request.match_info["attachment_id"])
+        except (OSError, ValueError) as exc:
+            return _error(f"Could not remove attachment: {exc}", 500)
+        if removed is None:
+            return _error("Attachment not found.", 404)
+        return web.json_response(storage.build_entry_state(vault_root, slug))
 
 
 async def _stream_zip_response(request, zip_path, filename):

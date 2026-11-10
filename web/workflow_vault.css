@@ -1611,9 +1611,12 @@
   gap: 4px;
   padding: 8px 14px 0;
   border-bottom: 1px solid var(--wv-border);
+  overflow-x: auto;
 }
 
 .wv-tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
   background: none;
   border: none;
   color: var(--wv-muted);
@@ -3056,6 +3059,50 @@
   color: #e6b45a;
 }
 
+.wv-attachments {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--wv-border);
+}
+
+.wv-attachments-header,
+.wv-attachment-row,
+.wv-attachment-actions,
+.wv-attachment-add {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wv-attachments-header,
+.wv-attachment-row {
+  justify-content: space-between;
+}
+
+.wv-attachments-header { flex-wrap: wrap; margin-bottom: 16px; }
+.wv-attachments-header h3 { margin: 0 0 4px; font-size: 15px; }
+.wv-attachments-header p { margin: 0; font-size: 12px; }
+.wv-attachment-input { display: none; }
+.wv-attachment-progress { font-size: 12px; }
+.wv-attachments-empty { color: var(--wv-muted); font-size: 13px; }
+.wv-attachments-list { display: flex; flex-direction: column; gap: 8px; }
+
+.wv-attachment-row {
+  padding: 12px;
+  background: var(--wv-surface);
+  border: 1px solid var(--wv-border);
+  border-radius: var(--wv-radius);
+  flex-wrap: wrap;
+}
+
+.wv-attachment-info { min-width: 0; flex: 1 1 220px; }
+.wv-attachment-name { overflow-wrap: anywhere; font-weight: 500; }
+.wv-attachment-name i { margin-right: 8px; color: var(--wv-muted); }
+.wv-attachment-meta { margin-top: 3px; font-size: 12px; }
+.wv-attachment-note { margin-top: 7px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.wv-attachment-actions { flex-wrap: wrap; }
+.wv-attachment-actions a { text-decoration: none; }
+
 /* ---------------------------------------------------------------------- */
 /* Wizard                                                                  */
 /* ---------------------------------------------------------------------- */
@@ -3863,6 +3910,10 @@
 .wv-fp-workflows,
 .wv-fp-seg.wv-fp-workflows {
   background: #a855f7;
+}
+.wv-fp-attachments,
+.wv-fp-seg.wv-fp-attachments {
+  background: #f59e0b;
 }
 .wv-fp-legend {
   display: flex;

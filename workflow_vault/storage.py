@@ -107,6 +107,20 @@ def write_notes(vault_root, slug, notes):
     utils.atomic_write_json(notes_path(vault_root, slug), {"notes": notes or []})
 
 
+def attachments_path(vault_root, slug):
+    return os.path.join(entry_dir(vault_root, slug), "attachments.json")
+
+
+def read_attachments(vault_root, slug):
+    data = utils.read_json(attachments_path(vault_root, slug), default={})
+    records = data.get("attachments") if isinstance(data, dict) else None
+    return [item for item in records if isinstance(item, dict)] if isinstance(records, list) else []
+
+
+def write_attachments(vault_root, slug, attachments):
+    utils.atomic_write_json(attachments_path(vault_root, slug), {"attachments": attachments})
+
+
 # --- id -> slug index -------------------------------------------------------
 # Every /entries/{id}/... route and every thumbnail request resolves an id to
 # its folder, so scanning all manifests per lookup made a grid of N cards cost
@@ -244,11 +258,11 @@ def _coerce_generation_types(manifest):
 
 # --- per-entry state cache --------------------------------------------------
 # The UI re-fetches /state after almost every mutation, and building it re-read
-# and re-parsed every entry's manifest, versions, examples and notes. A state is
+# and re-parsed every entry's manifest, versions, examples, notes and files. A state is
 # reused while a fingerprint of exactly the files it was built from is unchanged:
-# manifest.json, notes.json and notes.md (the legacy fallback), plus every
+# manifest.json, notes.json, attachments.json and notes.md (the legacy fallback), plus every
 # versions/*/version.json and examples/*/example.json. Nothing deeper feeds the
-# state (example media files are never read here), and listing those folders
+    # state (example media and attachment bytes are never read here), and listing those folders
 # each time means added or removed versions and examples change the fingerprint
 # without relying on directory mtimes.
 #
@@ -294,6 +308,7 @@ def _entry_fingerprint(vault_root, slug):
     if not add("manifest.json"):
         return None, False
     add("notes.json")
+    add("attachments.json")
     add("notes.md")
     for sub, filename in (("versions", "version.json"), ("examples", "example.json")):
         try:
@@ -331,6 +346,7 @@ def _read_entry_state(vault_root, slug):
         "versions": list_versions(vault_root, slug),
         "examples": list_examples(vault_root, slug),
         "notes": read_notes(vault_root, slug),
+        "attachments": read_attachments(vault_root, slug),
     }
 
 
@@ -367,7 +383,7 @@ def compute_footprint(vault_root):
     notes, and top-level vault metadata like folders.json/vault_settings.json)
     aren't bucketed but still count toward 'total'. Returns a flat dict the
     settings UI renders directly."""
-    totals = {"total": 0, "examples": 0, "thumbnails": 0, "workflows": 0}
+    totals = {"total": 0, "examples": 0, "thumbnails": 0, "workflows": 0, "attachments": 0}
     counts = {"entries": 0, "versions": 0, "examples_count": 0, "tags": 0}
     if not os.path.isdir(vault_root):
         return {**totals, **counts}
@@ -382,6 +398,7 @@ def compute_footprint(vault_root):
                 "thumbnails": "thumbnails",
                 "examples": "examples",
                 "versions": "workflows",
+                "attachments": "attachments",
             }.get(top)
             for name in files:
                 try:
@@ -542,6 +559,22 @@ def health_report(vault_root):
                         "path": rel,
                         "message": "Example references a media file that is missing or invalid.",
                     })
+
+        attachment_root = os.path.join(entry_root, "attachments")
+        for attachment in read_attachments(vault_root, slug):
+            rel = attachment.get("file") or ""
+            path = os.path.join(attachment_root, rel) if isinstance(rel, str) else ""
+            if not isinstance(rel, str) or not rel or not utils.is_path_inside(attachment_root, path) or not os.path.isfile(path):
+                summary["missing_files"] += 1
+                issues.append({
+                    "severity": "error",
+                    "type": "missing_attachment",
+                    "entry_id": entry_id,
+                    "entry_slug": slug,
+                    "attachment_id": attachment.get("id"),
+                    "path": rel,
+                    "message": "Entry references an attachment that is missing or invalid.",
+                })
 
     return {"ok": not issues, "summary": summary, "issues": issues}
 

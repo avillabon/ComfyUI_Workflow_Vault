@@ -118,10 +118,13 @@ Five tabs, each with a count badge where it applies:
   same hover-to-wipe compare slider used on the grid card. Each example supports
   a before/after compare slider for image input/output pairs, a "reveal in
   folder" button per media item, and per-example notes.
-- **Notes** — one or more Markdown notes per entry. **Add note** is always at
+- **Notes & Files** — one or more Markdown notes per entry. **Add note** is always at
   the top; once there are two or more, they appear as sub-tabs you can rename and
   delete. Notes render as Markdown with a toggle for in-place
-  editing.
+  editing. Attach original files such as private custom node ZIPs to the same
+  entry, add a short note about each file, and save a copy when needed. Files
+  are stored unchanged in the entry folder and included in entry and vault ZIP
+  exports. Each file may be up to 2 GiB.
 - **Versions** — full version history: add a new version, overwrite the current
   one, promote a past version, and edit per-version notes.
 - **Examples** — add, edit, delete, and reorder examples and their input/output
@@ -135,7 +138,7 @@ Five tabs, each with a count badge where it applies:
   the form scrolls, and are disabled until something changes.
 - **More actions (⋯)** in the entry header, available from every tab:
   **Duplicate** an entry into a new one (copies the thumbnail, tags, generation
-  types, examples, and notes, plus only the current version), **Archive** /
+  types, examples, notes, and files, plus only the current version), **Archive** /
   **Restore**, and **Delete** (sent to the OS Recycle Bin / Trash where
   supported). Actions that would drop unsaved edits ask first.
 

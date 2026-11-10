@@ -18,7 +18,7 @@ import { renderMarkdown } from "./vault_markdown.js";
 // edit form is "Details". The count badges come from the entry itself.
 const TABS = [
   { id: "overview", label: "Overview" },
-  { id: "notes", label: "Notes" },
+  { id: "notes", label: "Notes & Files" },
   { id: "versions", label: "Versions", count: (entry) => (entry.versions || []).length },
   { id: "examples", label: "Examples", count: (entry) => (entry.examples || []).length },
   { id: "details", label: "Details" },
@@ -522,7 +522,7 @@ async function duplicateEntryAction(controller, entry) {
   const name = await promptDialog({
     title: "Duplicate entry",
     message:
-      "Creates a new entry with the same thumbnail, tags, generation types, examples, and notes — plus just the current version. Give it a unique name:",
+      "Creates a new entry with the same thumbnail, tags, generation types, examples, notes, and files — plus just the current version. Give it a unique name:",
     defaultValue: `${entry.name} copy`,
     placeholder: "New entry name",
     confirmText: "Duplicate",
@@ -577,7 +577,7 @@ async function deleteEntryAction(controller, entry) {
   const trash = controller.state?.trash_label || "Trash";
   const ok = await confirmDialog({
     title: "Delete this entry?",
-    message: `"${entry.name}" and all its versions, examples, notes, and media will be removed from your vault and moved to the ${trash}. This can't be undone from inside the vault — you'd restore it from the ${trash}.`,
+    message: `"${entry.name}" and all its versions, examples, notes, files, and media will be removed from your vault and moved to the ${trash}. This can't be undone from inside the vault — you'd restore it from the ${trash}.`,
     confirmText: "Delete",
     danger: true,
   });

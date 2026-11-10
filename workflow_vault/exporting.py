@@ -23,9 +23,12 @@ def build_zip_file(source_root, arc_root, skip_staging=False):
                 if skip_staging:
                     dirs[:] = [d for d in dirs if not d.startswith(storage.staging_entry_prefix())]
                 for name in files:
+                    if os.path.basename(root) == "attachments" and name.startswith(".upload_"):
+                        continue  # an upload still in progress is not part of the entry
                     abs_path = os.path.join(root, name)
                     rel = os.path.relpath(abs_path, source_root)
-                    zf.write(abs_path, os.path.join(arc_root, rel))
+                    compression = zipfile.ZIP_STORED if "attachments" in rel.split(os.sep) else zipfile.ZIP_DEFLATED
+                    zf.write(abs_path, os.path.join(arc_root, rel), compress_type=compression)
         return tmp_path
     except Exception:
         try:

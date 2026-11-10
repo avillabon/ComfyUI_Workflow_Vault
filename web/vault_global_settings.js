@@ -835,6 +835,7 @@ function renderFootprint(container, fp) {
     ["examples", "Example media", "wv-fp-examples"],
     ["thumbnails", "Thumbnails", "wv-fp-thumbnails"],
     ["workflows", "Workflows", "wv-fp-workflows"],
+    ["attachments", "Files", "wv-fp-attachments"],
   ];
   const total = Math.max(0, fp.total || 0);
   // The bar shows how the media splits across the buckets above, so it's

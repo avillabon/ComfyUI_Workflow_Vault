@@ -109,6 +109,19 @@ export const VaultAPI = {
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/delete`, {}),
   duplicateEntry: (entryId, name) =>
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/duplicate`, { name }),
+  addAttachment: (entryId, file, options) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return postForm(`/workflow-vault/entries/${encodeURIComponent(entryId)}/attachments`, form, options);
+  },
+  updateAttachmentNote: (entryId, attachmentId, note) =>
+    postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/attachments/${encodeURIComponent(attachmentId)}/note`, { note }),
+  deleteAttachment: (entryId, attachmentId) =>
+    postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/attachments/${encodeURIComponent(attachmentId)}/delete`, {}),
+  attachmentUrl: (entryId, attachmentId) => {
+    const route = `/workflow-vault/entries/${encodeURIComponent(entryId)}/attachments/${encodeURIComponent(attachmentId)}/download`;
+    return typeof api.apiURL === "function" ? api.apiURL(route) : route;
+  },
   openEntryFolder: (entryId) =>
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/open-folder`, {}),
   revealMedia: (entryId, relPath) =>

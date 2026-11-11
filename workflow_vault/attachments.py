@@ -9,6 +9,15 @@ import tempfile
 from . import storage, utils
 
 MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB per file
+MAX_ATTACHMENT_NOTE_CHARS = 2000
+
+
+def _normalize_note(note):
+    if isinstance(note, str):
+        note = note.replace("\r\n", "\n").replace("\r", "\n")
+        if len(note) <= MAX_ATTACHMENT_NOTE_CHARS:
+            return note.strip()
+    raise ValueError("File note must be at most 2,000 characters.")
 
 
 def _directory(vault_root, slug):
@@ -44,8 +53,9 @@ def find(vault_root, slug, attachment_id):
     return record, _path(vault_root, slug, record)
 
 
-async def save_upload(vault_root, slug, part):
+async def save_upload(vault_root, slug, part, note=""):
     """Stream one multipart file to a temporary file, then publish metadata."""
+    note = _normalize_note(note)
     name = _filename(part.filename)
     directory = _directory(vault_root, slug)
     os.makedirs(directory, exist_ok=True)
@@ -80,7 +90,7 @@ async def save_upload(vault_root, slug, part):
             "file": filename,
             "size": size,
             "sha256": digest.hexdigest(),
-            "note": "",
+            "note": note,
             "added_at": utils.now_iso(),
         }
         os.replace(temp_path, final_path)
@@ -101,13 +111,12 @@ async def save_upload(vault_root, slug, part):
 
 
 def update_note(vault_root, slug, attachment_id, note):
-    if not isinstance(note, str) or len(note) > 2000:
-        raise ValueError("File note must be at most 2,000 characters.")
+    note = _normalize_note(note)
     records = storage.read_attachments(vault_root, slug)
     record = next((a for a in records if a.get("id") == attachment_id), None)
     if record is None:
         return False
-    record["note"] = note.strip()
+    record["note"] = note
     storage.write_attachments(vault_root, slug, records)
     return True
 

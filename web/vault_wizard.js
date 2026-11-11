@@ -419,8 +419,8 @@ function renderCreateForm(controller) {
         const saved = entry.examples?.[i];
         if (!saved) continue;
         const { inputFiles, outputFiles, inputFlags, outputFlags } = exampleFileSets[i];
-        const c1 = await convertFlaggedMedia(entry.id, saved.inputs || [], inputFiles, inputFlags);
-        const c2 = await convertFlaggedMedia(entry.id, saved.outputs || [], outputFiles, outputFlags);
+        const c1 = await convertFlaggedMedia(entry.id, saved, saved.inputs || [], inputFiles, inputFlags);
+        const c2 = await convertFlaggedMedia(entry.id, saved, saved.outputs || [], outputFiles, outputFlags);
         converted = converted || c1 || c2;
       }
       if (converted) await controller.refresh();

@@ -2,6 +2,10 @@
 
 import { api } from "../../scripts/api.js";
 
+export function exampleMediaPath(example, item) {
+  return `examples/${example.dir}/${item.file}`;
+}
+
 async function handle(resp) {
   if (!resp.ok) {
     let payload = {};
@@ -109,8 +113,9 @@ export const VaultAPI = {
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/delete`, {}),
   duplicateEntry: (entryId, name) =>
     postJSON(`/workflow-vault/entries/${encodeURIComponent(entryId)}/duplicate`, { name }),
-  addAttachment: (entryId, file, options) => {
+  addAttachment: (entryId, file, { note = "", ...options } = {}) => {
     const form = new FormData();
+    if (note) form.append("note", note);
     form.append("file", file, file.name);
     return postForm(`/workflow-vault/entries/${encodeURIComponent(entryId)}/attachments`, form, options);
   },

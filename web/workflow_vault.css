@@ -362,6 +362,7 @@
 .wv-form-row label {
   font-size: 12px;
   color: var(--wv-muted);
+  overflow-wrap: anywhere;
 }
 
 .wv-form-actions {

@@ -2,7 +2,7 @@
 // tabs (the others live in their own modules to keep files manageable).
 
 import { el, clear, videoEl, formatDate, showToast, confirmDialog, promptDialog, openImageLightbox, toggleField, createProgressStatus, openMenu, closeMenu } from "./vault_dom.js";
-import { VaultAPI } from "./vault_api.js";
+import { VaultAPI, exampleMediaPath } from "./vault_api.js";
 import { STATUS_LABELS, STATUS_ORDER, renderGenTypePicker, GENERATION_TYPE_MAP } from "./vault_modal.js";
 import { openWorkflowInGraph } from "./vault_workflow.js";
 import { renderVersionsTab } from "./vault_versions_tab.js";
@@ -753,7 +753,7 @@ function renderExampleGalleryCard(controller, entry, example) {
     currentIdx = (idx + items.length) % items.length;
     const { item, role } = items[currentIdx];
     clear(main);
-    main.appendChild(renderCarouselMedia(controller, entry, item));
+    main.appendChild(renderCarouselMedia(controller, entry, example, item));
     roleLabel.style.display = "";
     roleLabel.textContent = role;
     // The file already lives on disk in the vault — reveal it in the OS file
@@ -764,7 +764,7 @@ function renderExampleGalleryCard(controller, entry, example) {
     actionBtn.replaceChildren(el("i", { className: "pi pi-folder-open" }));
     mediaAction = async () => {
       try {
-        await VaultAPI.revealMedia(entry.id, item.file);
+        await VaultAPI.revealMedia(entry.id, exampleMediaPath(example, item));
       } catch (err) {
         showToast(err.message, "error");
       }
@@ -786,7 +786,7 @@ function renderExampleGalleryCard(controller, entry, example) {
     }
     comparing = true;
     clear(main);
-    main.appendChild(renderCompareSlider(entry, imgInput, imgOutput));
+    main.appendChild(renderCompareSlider(entry, example, imgInput, imgOutput));
     // The compare slider has its own Input/Output labels, so the carousel's
     // role pill would just overlap them — hide it while comparing.
     roleLabel.style.display = "none";
@@ -808,7 +808,7 @@ function renderExampleGalleryCard(controller, entry, example) {
       const btn = el(
         "button",
         { type: "button", className: "wv-gallery-item", title: it.item.label, onclick: () => show(idx) },
-        [renderGalleryThumb(entry, it.item)]
+        [renderGalleryThumb(entry, example, it.item)]
       );
       filmButtons.push(btn);
       filmstrip.appendChild(btn);
@@ -827,11 +827,13 @@ function renderExampleGalleryCard(controller, entry, example) {
 // Before/after comparison: two images stacked, the top (input) revealed up to a
 // hover-following divider via clip-path so both stay pixel-aligned. Matches the
 // thumbnail compare slider — move the cursor to wipe, no click needed.
-function renderCompareSlider(entry, inputItem, outputItem) {
+function renderCompareSlider(entry, example, inputItem, outputItem) {
   const wrap = el("div", { className: "wv-compare" });
-  const base = el("img", { className: "wv-compare-img", src: VaultAPI.mediaUrl(entry.id, outputItem.file), alt: "Output", draggable: "false" });
+  const outputUrl = VaultAPI.mediaUrl(entry.id, exampleMediaPath(example, outputItem), outputItem.id);
+  const inputUrl = VaultAPI.mediaUrl(entry.id, exampleMediaPath(example, inputItem), inputItem.id);
+  const base = el("img", { className: "wv-compare-img", src: outputUrl, alt: "Output", draggable: "false" });
   const overlay = el("div", { className: "wv-compare-overlay" }, [
-    el("img", { className: "wv-compare-img", src: VaultAPI.mediaUrl(entry.id, inputItem.file), alt: "Input", draggable: "false" }),
+    el("img", { className: "wv-compare-img", src: inputUrl, alt: "Input", draggable: "false" }),
   ]);
   const handle = el(
     "div",
@@ -880,8 +882,9 @@ function renderCompareSlider(entry, inputItem, outputItem) {
   return wrap;
 }
 
-function renderCarouselMedia(controller, entry, item) {
-  const url = VaultAPI.mediaUrl(entry.id, item.file);
+function renderCarouselMedia(controller, entry, example, item) {
+  const path = exampleMediaPath(example, item);
+  const url = VaultAPI.mediaUrl(entry.id, path, item.id);
   if (item.type === "image") {
     return el("img", { src: url, alt: item.label, className: "wv-carousel-image", onclick: () => openImageLightbox(url, item.label) });
   }
@@ -890,15 +893,15 @@ function renderCarouselMedia(controller, entry, item) {
       { src: url, controls: true },
       // A refresh re-reads state from the server, which now points the example
       // at the converted file — no need to patch the item in place.
-      { roomy: true, convert: { entryId: entry.id, file: item.file, onConverted: () => controller.refresh() } }
+      { roomy: true, convert: { entryId: entry.id, file: path, onConverted: () => controller.refresh() } }
     );
   }
   if (item.type === "audio") return el("audio", { src: url, controls: true });
   return el("div", { className: "wv-gallery-item-icon" }, [el("i", { className: "pi pi-file" })]);
 }
 
-function renderGalleryThumb(entry, item) {
-  const url = VaultAPI.mediaUrl(entry.id, item.file);
+function renderGalleryThumb(entry, example, item) {
+  const url = VaultAPI.mediaUrl(entry.id, exampleMediaPath(example, item), item.id);
   if (item.type === "image") return el("img", { src: url, alt: item.label });
   if (item.type === "video") return videoEl({ src: url, muted: true, preload: "metadata" }, { compact: true });
   if (item.type === "audio") return el("div", { className: "wv-gallery-item-icon" }, [el("i", { className: "pi pi-volume-up" })]);

@@ -2,7 +2,7 @@
 // example, with simple add/edit/reorder/delete management.
 
 import { el, videoEl, showToast, confirmDialog, promptDialog, formDialog, createProgressStatus } from "./vault_dom.js";
-import { VaultAPI } from "./vault_api.js";
+import { VaultAPI, exampleMediaPath } from "./vault_api.js";
 import { renderMarkdown } from "./vault_markdown.js";
 import { renderMediaPicker, convertFlaggedMedia } from "./vault_media_picker.js";
 
@@ -74,7 +74,6 @@ function renderNewExampleSlot(controller, entry) {
     committing = true;
     progress.reset();
     await picker.awaitPendingProbes();
-    const priorIds = new Set((entry.examples || []).map((e) => e.id));
     const inputFiles = picker.getByRole("input");
     const outputFiles = picker.getByRole("output");
     const inputFlags = picker.getConvertFlags("input");
@@ -96,10 +95,10 @@ function renderNewExampleSlot(controller, entry) {
         showToast(`Skipped unsupported file(s): ${result.skipped_files.join(", ")}`, "warn");
       }
       await controller.refresh();
-      const newExample = (result.examples || []).find((e) => !priorIds.has(e.id));
+      const newExample = (result.examples || []).find((e) => e.id === result.created_example_id);
       if (newExample) {
-        const convertedInputs = await convertFlaggedMedia(entry.id, newExample.inputs || [], inputFiles, inputFlags);
-        const convertedOutputs = await convertFlaggedMedia(entry.id, newExample.outputs || [], outputFiles, outputFlags);
+        const convertedInputs = await convertFlaggedMedia(entry.id, newExample, newExample.inputs || [], inputFiles, inputFlags);
+        const convertedOutputs = await convertFlaggedMedia(entry.id, newExample, newExample.outputs || [], outputFiles, outputFlags);
         if (convertedInputs || convertedOutputs) await controller.refresh();
       }
     } catch (e) {
@@ -216,7 +215,7 @@ function renderMediaGrid(controller, entry, example, key, emptyLabel) {
       cell.draggable = false;
     });
 
-    cell.appendChild(renderMediaPreview(controller, entry, item));
+    cell.appendChild(renderMediaPreview(controller, entry, example, item));
     cell.appendChild(el("div", { className: "wv-media-label" }, [item.label]));
 
     const controls = el("div", { className: "wv-media-controls" });
@@ -281,13 +280,14 @@ function enableExampleMediaDnd(controller, entry, example, inputsGrid, outputsGr
   }
 }
 
-function renderMediaPreview(controller, entry, item) {
-  const url = VaultAPI.mediaUrl(entry.id, item.file);
+function renderMediaPreview(controller, entry, example, item) {
+  const path = exampleMediaPath(example, item);
+  const url = VaultAPI.mediaUrl(entry.id, path, item.id);
   if (item.type === "image") return el("img", { src: url, className: "wv-media-thumb", alt: item.label });
   if (item.type === "video") {
     return videoEl(
       { src: url, controls: true, className: "wv-media-thumb" },
-      { convert: { entryId: entry.id, file: item.file, onConverted: () => controller.refresh() } }
+      { convert: { entryId: entry.id, file: path, onConverted: () => controller.refresh() } }
     );
   }
   if (item.type === "audio") return el("audio", { src: url, controls: true, className: "wv-media-audio" });
@@ -339,8 +339,8 @@ function renderAddMediaRow(controller, entry, example) {
         if (updated) {
           const newInputs = (updated.inputs || []).filter((m) => !priorInputIds.has(m.id));
           const newOutputs = (updated.outputs || []).filter((m) => !priorOutputIds.has(m.id));
-          const convertedInputs = await convertFlaggedMedia(entry.id, newInputs, inputFiles, inputFlags);
-          const convertedOutputs = await convertFlaggedMedia(entry.id, newOutputs, outputFiles, outputFlags);
+          const convertedInputs = await convertFlaggedMedia(entry.id, updated, newInputs, inputFiles, inputFlags);
+          const convertedOutputs = await convertFlaggedMedia(entry.id, updated, newOutputs, outputFiles, outputFlags);
           if (convertedInputs || convertedOutputs) await controller.refresh();
         }
       } catch (e) {

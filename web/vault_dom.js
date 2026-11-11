@@ -443,7 +443,7 @@ export function promptDialog({ title = "Enter a value", message = "", defaultVal
 
 /**
  * Renders a small form dialog. fields: [{name, label, type, value, options,
- * placeholder}] where type is "text" | "textarea" | "select" | "checkbox".
+ * placeholder, maxLength}] where type is "text" | "textarea" | "select" | "checkbox".
  * Resolves an object of values keyed by field name, or null if cancelled.
  */
 export function formDialog({ title = "Edit", message = "", fields = [], confirmText = "Save" } = {}) {
@@ -471,6 +471,8 @@ export function formDialog({ title = "Edit", message = "", fields = [], confirmT
       } else {
         input = el("input", { className: "wv-input", type: "text", value: f.value || "", placeholder: f.placeholder || "" });
       }
+      if (f.label) input.setAttribute("aria-label", f.label);
+      if (f.maxLength != null) input.maxLength = f.maxLength;
       inputs[f.name] = input;
       row.appendChild(input);
       body.appendChild(row);

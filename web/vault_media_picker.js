@@ -13,7 +13,7 @@ import { el, clear, videoEl, showToast, confirmDialog } from "./vault_dom.js";
 import { canvasAvailable, detectCanvasMedia, fetchCanvasFile } from "./vault_canvas_media.js";
 import { onPasteInto, renderPasteButton } from "./vault_clipboard.js";
 import { probeVideoCodec } from "./vault_codec_probe.js";
-import { VaultAPI } from "./vault_api.js";
+import { VaultAPI, exampleMediaPath } from "./vault_api.js";
 
 export const MEDIA_ACCEPT = ".png,.jpg,.jpeg,.webp,.gif,.mp4,.mov,.webm,.wav,.mp3,.m4a,.flac,.ogg";
 const MEDIA_EXTS = MEDIA_ACCEPT.split(",").map((e) => e.replace(".", "").trim());
@@ -467,20 +467,19 @@ export function renderMediaPicker({ accept = MEDIA_ACCEPT, onChange, preview = f
 // for a match — callers are responsible for scoping that set to only the
 // items that were actually just created, so a same-named pre-existing file
 // elsewhere in the entry is never mistaken for the one just flagged.
-export async function convertFlaggedMedia(entryId, mediaItems, files, flags) {
+export async function convertFlaggedMedia(entryId, example, mediaItems, files, flags) {
   const used = new Set();
   const targets = [];
   files.forEach((file, i) => {
-    if (!flags[i]) return;
     const match = mediaItems.find((m) => !used.has(m) && m.original_filename === file.name);
     if (match) {
       used.add(match);
-      targets.push(match);
+      if (flags[i]) targets.push(match);
     }
   });
   for (const item of targets) {
     try {
-      const result = await VaultAPI.convertMedia(entryId, item.file);
+      const result = await VaultAPI.convertMedia(entryId, exampleMediaPath(example, item));
       showToast(`Converted ${result.codec} to H.264 (${formatSize(result.bytes_before)} → ${formatSize(result.bytes_after)}). The original was kept.`, "success");
     } catch (e) {
       showToast(`Couldn't convert "${item.original_filename}": ${e.message}`, "error");

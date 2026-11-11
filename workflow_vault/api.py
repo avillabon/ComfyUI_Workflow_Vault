@@ -622,9 +622,21 @@ async def post_attachment(request):
         try:
             reader = await request.multipart()
             part = await reader.next()
+            note = ""
+            # Read the optional note before streaming the file, so both are
+            # published in the same attachment record.
+            if part is not None and part.name == "note" and part.filename is None:
+                note_bytes = bytearray()
+                max_note_bytes = attachments.MAX_ATTACHMENT_NOTE_CHARS * 4  # UTF-8
+                while chunk := await part.read_chunk():
+                    note_bytes.extend(chunk)
+                    if len(note_bytes) > max_note_bytes:
+                        return _error("File note must be at most 2,000 characters.")
+                note = note_bytes.decode("utf-8")
+                part = await reader.next()
             if part is None or part.name != "file" or not part.filename:
                 return _error("Choose a file to attach.")
-            await attachments.save_upload(vault_root, slug, part)
+            await attachments.save_upload(vault_root, slug, part, note)
         except ValueError as exc:
             return _error(str(exc))
         except Exception as exc:
@@ -1064,6 +1076,7 @@ async def post_create_example(request):
             return _error(err_msg)
         storage.write_manifest(vault_root, slug, manifest)
         state = storage.build_entry_state(vault_root, slug)
+        state["created_example_id"] = example["id"]
         if skipped:
             state["skipped_files"] = skipped
         return web.json_response(state)

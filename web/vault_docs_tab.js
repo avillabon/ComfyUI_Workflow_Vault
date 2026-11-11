@@ -1,9 +1,13 @@
 // Notes & Files tab. Notes keep their existing save flow; files are copied
 // immediately into the entry so the originals remain recoverable.
 
-import { el, showToast, confirmDialog, promptDialog, formatBytes } from "./vault_dom.js";
+import { el, showToast, confirmDialog, formDialog, formatBytes } from "./vault_dom.js";
 import { VaultAPI } from "./vault_api.js";
 import { renderNotesEditor } from "./vault_notes_editor.js";
+
+function noteField(name, label, value = "") {
+  return { name, label, value, type: "textarea", maxLength: 2000, placeholder: "Describe this file (optional)" };
+}
 
 export function renderDocsTab(controller, entry) {
   const wrap = el("div", { className: "wv-docs-tab" });
@@ -83,18 +87,29 @@ export function renderDocsTab(controller, entry) {
   input.addEventListener("change", async () => {
     const selected = Array.from(input.files || []);
     input.value = "";
-    if (!selected.length || !await controller.checkDirty()) return;
+    const validFiles = selected.filter((file) => {
+      if (file.size && file.size <= 2 * 1024 ** 3) return true;
+      showToast(`${file.name}: Files must be nonempty and no larger than 2 GiB.`, "error");
+      return false;
+    });
+    if (!validFiles.length) return;
+
     addBtn.disabled = true;
     let saved = 0;
     try {
-      for (const file of selected) {
-        if (!file.size || file.size > 2 * 1024 ** 3) {
-          showToast(`${file.name}: Files must be nonempty and no larger than 2 GiB.`, "error");
-          continue;
-        }
-        progress.textContent = `Adding ${file.name} (${saved + 1} of ${selected.length})…`;
+      const fields = validFiles.map((file, index) => noteField(`note_${index}`, file.name));
+      const notes = await formDialog({
+        title: validFiles.length === 1 ? "Attach file" : "Attach files",
+        fields,
+        confirmText: validFiles.length === 1 ? "Attach file" : "Attach files",
+      });
+      if (!notes || !await controller.checkDirty()) return;
+
+      for (const [index, file] of validFiles.entries()) {
+        progress.textContent = `Adding ${file.name} (${index + 1} of ${validFiles.length})…`;
         try {
           await VaultAPI.addAttachment(entry.id, file, {
+            note: notes[fields[index].name].trim(),
             onProgress: ({ phase, percent }) => {
               progress.textContent = `${phase === "processing" ? "Saving" : "Uploading"} ${file.name}${percent == null ? "" : ` · ${percent}%`}`;
             },
@@ -141,10 +156,14 @@ export function renderDocsTab(controller, entry) {
         ]),
         el("button", { type: "button", className: "wv-icon-btn", title: "Edit file note", "aria-label": `Edit note for ${name}`, onclick: async () => {
           if (!await controller.checkDirty()) return;
-          const note = await promptDialog({ title: `Note for ${name}`, message: "What is this file for?", defaultValue: attachment.note || "", confirmText: "Save note" });
-          if (note == null) return;
+          const result = await formDialog({
+            title: "Edit file note",
+            fields: [noteField("note", name, attachment.note)],
+            confirmText: "Save note",
+          });
+          if (!result) return;
           try {
-            await VaultAPI.updateAttachmentNote(entry.id, attachment.id, note);
+            await VaultAPI.updateAttachmentNote(entry.id, attachment.id, result.note);
             await controller.refresh();
             showToast("File note saved.", "success");
           } catch (err) { showToast(err.message, "error"); }

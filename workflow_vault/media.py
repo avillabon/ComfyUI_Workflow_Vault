@@ -266,10 +266,9 @@ def _resolve_referenced_path(vault_root, slug, manifest, rel_path):
     """Return the entry-relative path for rel_path if it is referenced by
     this entry's thumbnail or example media, else None.
 
-    rel_path may already be entry-relative (e.g. "thumbnails/cover.png") or,
-    for example media, relative to the example's own directory (e.g.
-    "outputs/CLIP B.mp4"), since that's how item["file"] is stored and how
-    the frontend requests it.
+    The frontend uses entry-relative paths (e.g.
+    "examples/example_001/outputs/CLIP B.mp4"). Older callers may still
+    pass example-relative paths (e.g. "outputs/CLIP B.mp4").
     """
     for key in MANIFEST_MEDIA_KEYS:
         if (manifest.get(key) or "").replace("\\", "/") == rel_path:

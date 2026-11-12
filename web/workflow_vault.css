@@ -543,6 +543,10 @@
   display: block;
 }
 
+video.wv-mp-media {
+  object-fit: contain;
+}
+
 .wv-mp-thumb-audio {
   background: var(--wv-card-bg);
 }
@@ -2514,6 +2518,10 @@
   object-fit: cover;
 }
 
+.wv-gallery-item video {
+  object-fit: contain;
+}
+
 .wv-gallery-item-active {
   border-color: var(--wv-accent);
   box-shadow: 0 0 0 3px rgba(77, 159, 255, 0.18);
@@ -2888,6 +2896,10 @@
   object-fit: cover;
   background: var(--wv-bg);
   border-radius: 3px;
+}
+
+video.wv-media-thumb {
+  object-fit: contain;
 }
 
 .wv-media-audio {
